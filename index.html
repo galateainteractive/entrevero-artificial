@@ -6,7 +6,7 @@
     <style>
         body {
             background-color: #1a1a1a;
-            color: #00ff41; /* Cyberpunk Green */
+            color: #00ff41; 
             font-family: 'Courier New', Courier, monospace;
             display: flex;
             flex-direction: column;
@@ -50,24 +50,24 @@
 
         button:active { transform: scale(0.98); }
 
-        /* Estilo para quando o botão for de PARAR */
         button.stop-mode {
             background: #ff0055;
             color: #fff;
+            box-shadow: 0 0 10px #ff0055;
         }
 
-        #status { margin-bottom: 15px; font-weight: bold; }
+        #status { margin-bottom: 15px; font-weight: bold; letter-spacing: 1px; }
 
         #log {
             font-size: 12px;
-            color: #888;
+            color: #666;
             height: 150px;
             overflow-y: hidden;
             border-top: 1px solid #444;
             padding-top: 10px;
-            text-align: left;
+            text-align: center; /* Centralizado para ficar mais abstrato */
             display: flex;
-            flex-direction: column-reverse; /* Log novo aparece em cima */
+            flex-direction: column-reverse; 
         }
     </style>
 </head>
@@ -76,17 +76,16 @@
     <h1>ENTREVERO_AI</h1>
 
     <div class="controls">
-        <button id="btnControl" onclick="togglePlay()">CARREGAR</button>
+        <button id="btnControl" onclick="togglePlay()">INICIAR SISTEMA</button>
         
-        <div id="status">Sistema em espera...</div>
-        <div id="log">Logs aparecerão aqui...</div>
+        <div id="status">AGUARDANDO...</div>
+        <div id="log"></div>
     </div>
 
     <script>
     // --- CONFIGURAÇÃO ---
-    // Ajuste aqui conforme seus arquivos
     const songStructure = [
-        { name: "A_01", variations: 19 }, // 1 Original + 19 Variações
+        { name: "A_01", variations: 19 }, 
     ];
 
     // --- VARIÁVEIS GLOBAIS ---
@@ -97,52 +96,48 @@
     let currentBlockIndex = 0;
     let nextNoteTime = 0;
     let timerID;
-    let currentSourceNode = null; // Para poder parar o som atual
+    let currentSourceNode = null;
+    let shuffleBags = {}; 
 
-    // 1. CONTROLE PRINCIPAL (PLAY / STOP)
+    // 1. CONTROLE PRINCIPAL
     async function togglePlay() {
         const btn = document.getElementById('btnControl');
 
-        // Se ainda não carregou, carrega primeiro
         if (!isLoaded) {
             btn.disabled = true;
-            btn.innerText = "BAIXANDO...";
+            btn.innerText = "CARREGANDO...";
             await initAudio();
             isLoaded = true;
             btn.disabled = false;
-            // Auto-play após carregar
             startPlayback(); 
             return;
         }
 
-        // Se já está tocando, PARA.
         if (isPlaying) {
             stopPlayback();
         } else {
-            // Se está parado, TOCA.
             startPlayback();
         }
     }
 
-    // 2. INICIALIZAÇÃO E DOWNLOAD
+    // 2. INICIALIZAÇÃO
     async function initAudio() {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         
         try {
-            document.getElementById('status').innerText = "Baixando arquivos...";
+            document.getElementById('status').innerText = "BAIXANDO DADOS...";
             await loadAllFiles();
-            document.getElementById('status').innerText = "Pronto.";
+            document.getElementById('status').innerText = "PRONTO.";
         } catch (e) {
             console.error(e);
-            document.getElementById('status').innerText = "ERRO: Arquivos faltando.";
+            document.getElementById('status').innerText = "ERRO: ARQUIVOS 404";
         }
     }
 
     async function loadAllFiles() {
         for (let block of songStructure) {
-            // Carrega Original
+            shuffleBags[block.name] = []; 
             await loadFile(`${block.name}_ORG.mp3`);
-            // Carrega Variações
             for (let i = 1; i <= block.variations; i++) {
                 await loadFile(`${block.name}_VAR_${i}.mp3`);
             }
@@ -154,7 +149,6 @@
         if (!response.ok) throw new Error(`404: ${filename}`);
         const arrayBuffer = await response.arrayBuffer();
         audioBuffers[filename] = await audioCtx.decodeAudioData(arrayBuffer);
-        console.log("OK: " + filename);
     }
 
     // 3. LOGICA DE START / STOP
@@ -162,14 +156,14 @@
         if (audioCtx.state === 'suspended') audioCtx.resume();
         
         isPlaying = true;
-        currentBlockIndex = 0; // Reinicia do começo da música
+        currentBlockIndex = 0; 
         nextNoteTime = audioCtx.currentTime + 0.1;
         
-        // Atualiza Botão
         const btn = document.getElementById('btnControl');
-        btn.innerText = "PARAR";
-        btn.classList.add("stop-mode"); // Fica vermelho
-        document.getElementById('status').innerText = "GERANDO...";
+        btn.innerText = "INTERROMPER";
+        btn.classList.add("stop-mode");
+        document.getElementById('status').innerText = "SINTONIZANDO...";
+        document.getElementById('log').innerHTML = ""; // Limpa o log ao começar
 
         scheduler();
     }
@@ -178,61 +172,60 @@
         isPlaying = false;
         clearTimeout(timerID);
         
-        // Mata o som atual imediatamente
         if (currentSourceNode) {
             try { currentSourceNode.stop(); } catch(e){}
         }
 
-        // Atualiza Botão
         const btn = document.getElementById('btnControl');
-        btn.innerText = "TOCAR NOVAMENTE";
-        btn.classList.remove("stop-mode"); // Volta a ser verde
-        document.getElementById('status').innerText = "Parado.";
+        btn.innerText = "REINICIAR";
+        btn.classList.remove("stop-mode");
+        document.getElementById('status').innerText = "SINAL PERDIDO.";
     }
 
-    // 4. MOTOR DE DECISÃO (SCHEDULER)
+    // 4. MOTOR DE DECISÃO
     function scheduler() {
         if (!isPlaying) return;
-
         while (nextNoteTime < audioCtx.currentTime + 1.5) {
             scheduleNextBlock();
         }
-        
         timerID = setTimeout(scheduler, 100);
     }
 
     function scheduleNextBlock() {
         const blockConfig = songStructure[currentBlockIndex];
         
-        // --- NOVA LÓGICA DE SORTEIO (TOTALMENTE ALEATÓRIO) ---
-        // Total de opções = 1 (Original) + N (Variações)
-        let totalOptions = 1 + blockConfig.variations;
-        
-        // Sorteia um número de 0 até totalOptions-1
-        let choice = Math.floor(Math.random() * totalOptions);
-        
-        let filename;
-        let typeLabel;
+        // --- SHUFFLE BAG ---
+        let bag = shuffleBags[blockConfig.name];
+        if (bag.length === 0) {
+            let totalOptions = 1 + blockConfig.variations;
+            for (let i = 0; i < totalOptions; i++) {
+                bag.push(i);
+            }
+            // Embaralha
+            for (let i = bag.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [bag[i], bag[j]] = [bag[j], bag[i]];
+            }
+        }
 
+        let choice = bag.pop();
+        let filename;
+        
+        // Define o arquivo (sem se importar com rótulos)
         if (choice === 0) {
-            // Caiu no zero = Toca Original
             filename = `${blockConfig.name}_ORG.mp3`;
-            typeLabel = "ORIGINAL (HUMANO)";
         } else {
-            // Caiu em qualquer outro = Toca a Variação correspondente
-            // Ex: Se choice for 1, toca VAR_1. Se choice for 5, toca VAR_5.
             filename = `${blockConfig.name}_VAR_${choice}.mp3`;
-            typeLabel = `IA VARIAÇÃO ${choice}`;
         }
 
         playBuffer(filename, nextNoteTime);
-        updateLog(blockConfig.name, filename, typeLabel);
+        
+        // Log abstrato: passa 'true' se for IA (choice > 0) apenas para definir a cor
+        updateLog(choice > 0); 
 
-        // Prepara o tempo do próximo
         let buffer = audioBuffers[filename];
         nextNoteTime += buffer.duration; 
 
-        // Loop Infinito
         currentBlockIndex++;
         if (currentBlockIndex >= songStructure.length) {
             currentBlockIndex = 0;
@@ -241,23 +234,26 @@
 
     function playBuffer(key, time) {
         if (!audioBuffers[key]) return;
-        
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffers[key];
         source.connect(audioCtx.destination);
         source.start(time);
-        
-        // Salva referência para poder parar depois se clicar no botão stop
-        // (Nota: isso salva apenas o último agendado, o que é ok para stop imediato)
         currentSourceNode = source; 
     }
 
-    function updateLog(section, file, label) {
+    function updateLog(isAI) {
         const log = document.getElementById('log');
-        const color = label.includes("IA") ? "#ff0055" : "#00ff41"; 
+        document.getElementById('status').innerText = "TRANSMITINDO";
         
-        // Adiciona linha nova no topo
-        log.innerHTML = `> [${section}] <span style="color:${color}">${label}</span><br>` + log.innerHTML;
+        // Visual abstrato: muda a cor mas o texto é apenas símbolos
+        const color = isAI ? "#ff0055" : "#00ff41"; 
+        
+        // Gera uma linha de "onda" aleatória para dar sensação de atividade
+        let wave = "";
+        let len = Math.floor(Math.random() * 10) + 5;
+        for(let i=0; i<len; i++) wave += "|";
+
+        log.innerHTML = `<div style="color:${color}; letter-spacing:3px; opacity:0.7;">${wave}</div>` + log.innerHTML;
     }
 
     </script>
