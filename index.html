@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Entrevero - Caos Infinito (Turbo)</title>
+    <title>Entrevero - Streaming Progressivo</title>
     <style>
         body {
             background-color: #1a1a1a;
@@ -43,12 +43,9 @@
             transition: all 0.2s;
         }
 
-        button:hover {
-            background: #fff;
-            transform: scale(1.02);
-        }
-
+        button:hover { background: #fff; transform: scale(1.02); }
         button:active { transform: scale(0.98); }
+        button:disabled { background: #555; color: #888; cursor: wait; }
 
         button.stop-mode {
             background: #ff0055;
@@ -56,7 +53,7 @@
             box-shadow: 0 0 10px #ff0055;
         }
 
-        #status { margin-bottom: 15px; font-weight: bold; letter-spacing: 1px; }
+        #status { margin-bottom: 15px; font-weight: bold; letter-spacing: 1px; min-height: 20px; }
 
         #log {
             font-size: 12px;
@@ -78,7 +75,7 @@
     <div class="controls">
         <button id="btnControl" onclick="togglePlay()">INICIAR SISTEMA</button>
         
-        <div id="status">AGUARDANDO...</div>
+        <div id="status">SISTEMA ONLINE</div>
         <div id="log"></div>
     </div>
 
@@ -88,31 +85,19 @@
         { name: "A_01", variations: 19 }, 
     ];
 
-    // --- VARIÁVEIS GLOBAIS ---
+    // --- VARIÁVEIS DO SISTEMA ---
     let audioCtx;
-    let audioBuffers = {};
+    let audioBuffers = {}; // Cache (o que já foi baixado fica aqui)
     let isPlaying = false;
-    let isLoaded = false;
-    let currentBlockIndex = 0;
     let nextNoteTime = 0;
-    let timerID;
     let currentSourceNode = null;
     let shuffleBags = {}; 
+    let lookaheadTimer;
 
     // 1. CONTROLE PRINCIPAL
-    async function togglePlay() {
-        const btn = document.getElementById('btnControl');
-
-        if (!isLoaded) {
-            btn.disabled = true;
-            btn.innerText = "CARREGANDO...";
-            await initAudio();
-            isLoaded = true;
-            btn.disabled = false;
-            startPlayback(); 
-            return;
-        }
-
+    function togglePlay() {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
         if (isPlaying) {
             stopPlayback();
         } else {
@@ -120,68 +105,27 @@
         }
     }
 
-    // 2. INICIALIZAÇÃO OTIMIZADA (TURBO)
-    async function initAudio() {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        
-        try {
-            document.getElementById('status').innerText = "BAIXANDO DADOS...";
-            await loadAllFiles();
-            document.getElementById('status').innerText = "PRONTO.";
-        } catch (e) {
-            console.error(e);
-            document.getElementById('status').innerText = "ERRO: ARQUIVOS 404";
-            alert("Erro ao baixar arquivos. Verifique o console.");
-        }
-    }
-
-    async function loadAllFiles() {
-        // Cria uma lista de tarefas de download
-        let downloadTasks = [];
-
-        for (let block of songStructure) {
-            shuffleBags[block.name] = []; 
-            
-            // Adiciona o Original na lista de tarefas
-            downloadTasks.push(loadFile(`${block.name}_ORG.mp3`));
-            
-            // Adiciona todas as variações na lista
-            for (let i = 1; i <= block.variations; i++) {
-                downloadTasks.push(loadFile(`${block.name}_VAR_${i}.mp3`));
-            }
-        }
-
-        // DISPARA TUDO DE UMA VEZ E ESPERA TODOS TERMINAREM
-        await Promise.all(downloadTasks);
-    }
-
-    async function loadFile(filename) {
-        const response = await fetch(filename);
-        if (!response.ok) throw new Error(`404: ${filename}`);
-        const arrayBuffer = await response.arrayBuffer();
-        audioBuffers[filename] = await audioCtx.decodeAudioData(arrayBuffer);
-    }
-
-    // 3. LOGICA DE START / STOP
-    function startPlayback() {
+    // 2. LÓGICA DE STREAMING
+    async function startPlayback() {
         if (audioCtx.state === 'suspended') audioCtx.resume();
         
         isPlaying = true;
-        currentBlockIndex = 0; 
-        nextNoteTime = audioCtx.currentTime + 0.1;
-        
+        nextNoteTime = audioCtx.currentTime + 0.1; // Começa "agora"
+
+        // UI Update
         const btn = document.getElementById('btnControl');
-        btn.innerText = "INTERROMPER";
+        btn.innerText = "PARAR";
         btn.classList.add("stop-mode");
-        document.getElementById('status').innerText = "SINTONIZANDO...";
+        document.getElementById('status').innerText = "INICIANDO BUFFER...";
         document.getElementById('log').innerHTML = ""; 
 
-        scheduler();
+        // Começa o ciclo vicioso: Baixa 1 -> Toca -> Baixa Próximo
+        processNextChunk();
     }
 
     function stopPlayback() {
         isPlaying = false;
-        clearTimeout(timerID);
+        clearTimeout(lookaheadTimer); // Cancela o agendamento do próximo
         
         if (currentSourceNode) {
             try { currentSourceNode.stop(); } catch(e){}
@@ -190,54 +134,76 @@
         const btn = document.getElementById('btnControl');
         btn.innerText = "REINICIAR";
         btn.classList.remove("stop-mode");
-        document.getElementById('status').innerText = "SINAL PERDIDO.";
+        btn.disabled = false;
+        document.getElementById('status').innerText = "PARADO.";
     }
 
-    // 4. MOTOR DE DECISÃO
-    function scheduler() {
+    // ESSA É A NOVA MÁGICA (Função Recursiva)
+    async function processNextChunk() {
         if (!isPlaying) return;
-        while (nextNoteTime < audioCtx.currentTime + 1.5) {
-            scheduleNextBlock();
+
+        // 1. Decide qual é a próxima música (Sorteio)
+        const nextFile = getNextRandomFile();
+        
+        // 2. Baixa ela (se já tiver no cache, é instantâneo)
+        try {
+            // Se for a primeira, avisa que tá baixando
+            if (audioBuffers[nextFile]) {
+                document.getElementById('status').innerText = "TRANSMITINDO (CACHE)";
+            } else {
+                document.getElementById('status').innerText = "BAIXANDO PACOTE...";
+            }
+
+            await loadFile(nextFile);
+            
+            // 3. Toca ela
+            if (!isPlaying) return; // Checa se não parou enquanto baixava
+            playAndScheduleNext(nextFile);
+
+        } catch (e) {
+            console.error("Erro no download", e);
+            document.getElementById('status').innerText = "ERRO DE REDE. TENTANDO...";
+            // Tenta de novo em 1s se der erro
+            lookaheadTimer = setTimeout(processNextChunk, 1000); 
         }
-        timerID = setTimeout(scheduler, 100);
     }
 
-    function scheduleNextBlock() {
-        const blockConfig = songStructure[currentBlockIndex];
+    function playAndScheduleNext(filename) {
+        const buffer = audioBuffers[filename];
+        const duration = buffer.duration;
         
-        // --- SHUFFLE BAG ---
-        let bag = shuffleBags[blockConfig.name];
-        if (bag.length === 0) {
-            let totalOptions = 1 + blockConfig.variations;
-            for (let i = 0; i < totalOptions; i++) {
-                bag.push(i);
-            }
-            // Embaralha
-            for (let i = bag.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [bag[i], bag[j]] = [bag[j], bag[i]];
-            }
+        // Se o tempo agendado já passou (internet lenta), toca AGORA.
+        // Se não, toca no tempo certo para ficar sem buraco.
+        let playTime = nextNoteTime;
+        if (playTime < audioCtx.currentTime) {
+            playTime = audioCtx.currentTime;
         }
 
-        let choice = bag.pop();
-        let filename;
+        playBuffer(filename, playTime);
         
-        if (choice === 0) {
-            filename = `${blockConfig.name}_ORG.mp3`;
-        } else {
-            filename = `${blockConfig.name}_VAR_${choice}.mp3`;
-        }
+        // Atualiza Log
+        let isAI = filename.includes("VAR");
+        updateLog(isAI);
+        document.getElementById('status').innerText = "TRANSMITINDO";
 
-        playBuffer(filename, nextNoteTime);
-        updateLog(choice > 0); 
+        // Prepara o tempo para a PRÓXIMA música
+        nextNoteTime = playTime + duration;
 
-        let buffer = audioBuffers[filename];
-        nextNoteTime += buffer.duration; 
+        // --- O PULO DO GATO ---
+        // Assim que essa começar a tocar, já chamamos a função para baixar a próxima.
+        // O await do download vai acontecer enquanto essa música toca.
+        processNextChunk(); 
+    }
 
-        currentBlockIndex++;
-        if (currentBlockIndex >= songStructure.length) {
-            currentBlockIndex = 0;
-        }
+    // --- FERRAMENTAS ---
+
+    async function loadFile(filename) {
+        if (audioBuffers[filename]) return; // Já tem? Retorna.
+
+        const response = await fetch(filename);
+        if (!response.ok) throw new Error(`404: ${filename}`);
+        const arrayBuffer = await response.arrayBuffer();
+        audioBuffers[filename] = await audioCtx.decodeAudioData(arrayBuffer);
     }
 
     function playBuffer(key, time) {
@@ -249,16 +215,38 @@
         currentSourceNode = source; 
     }
 
+    function getNextRandomFile() {
+        // Pega o bloco (A_01) - no futuro pode ter lógica pra mudar de bloco
+        // Como só tem 1 bloco, pegamos o índice 0 sempre
+        const blockConfig = songStructure[0]; 
+        
+        // Lógica do Shuffle Bag (Saco de Sorteio)
+        let bag = shuffleBags[blockConfig.name];
+        if (!bag || bag.length === 0) {
+            // Enche o saco
+            bag = [];
+            let totalOptions = 1 + blockConfig.variations;
+            for (let i = 0; i < totalOptions; i++) bag.push(i);
+            // Embaralha
+            for (let i = bag.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [bag[i], bag[j]] = [bag[j], bag[i]];
+            }
+            shuffleBags[blockConfig.name] = bag;
+        }
+
+        let choice = bag.pop();
+        
+        if (choice === 0) return `${blockConfig.name}_ORG.mp3`;
+        return `${blockConfig.name}_VAR_${choice}.mp3`;
+    }
+
     function updateLog(isAI) {
         const log = document.getElementById('log');
-        document.getElementById('status').innerText = "TRANSMITINDO";
-        
         const color = isAI ? "#ff0055" : "#00ff41"; 
-        
         let wave = "";
         let len = Math.floor(Math.random() * 10) + 5;
         for(let i=0; i<len; i++) wave += "|";
-
         log.innerHTML = `<div style="color:${color}; letter-spacing:3px; opacity:0.7;">${wave}</div>` + log.innerHTML;
     }
 
