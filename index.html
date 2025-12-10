@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Entrevero - Streaming Progressivo</title>
+    <title>Entrevero - Player Estável</title>
     <style>
         body {
             background-color: #1a1a1a;
@@ -87,15 +87,19 @@
 
     // --- VARIÁVEIS DO SISTEMA ---
     let audioCtx;
-    let audioBuffers = {}; // Cache (o que já foi baixado fica aqui)
+    let audioBuffers = {}; // Cache
     let isPlaying = false;
     let nextNoteTime = 0;
     let currentSourceNode = null;
     let shuffleBags = {}; 
-    let lookaheadTimer;
+    let retryTimer;
+    
+    // O "Freio de Mão" para downloads
+    let downloadController = null; 
 
     // 1. CONTROLE PRINCIPAL
     function togglePlay() {
+        // Inicializa AudioContext no primeiro clique (regra dos navegadores)
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         
         if (isPlaying) {
@@ -110,124 +114,155 @@
         if (audioCtx.state === 'suspended') audioCtx.resume();
         
         isPlaying = true;
-        nextNoteTime = audioCtx.currentTime + 0.1; // Começa "agora"
+        nextNoteTime = audioCtx.currentTime + 0.1; 
+        
+        // Reinicia o controlador de downloads
+        downloadController = new AbortController();
 
         // UI Update
         const btn = document.getElementById('btnControl');
         btn.innerText = "PARAR";
         btn.classList.add("stop-mode");
+        btn.disabled = false;
+        
         document.getElementById('status').innerText = "INICIANDO BUFFER...";
         document.getElementById('log').innerHTML = ""; 
 
-        // Começa o ciclo vicioso: Baixa 1 -> Toca -> Baixa Próximo
+        // Começa o ciclo
         processNextChunk();
     }
 
     function stopPlayback() {
         isPlaying = false;
-        clearTimeout(lookaheadTimer); // Cancela o agendamento do próximo
         
-        if (currentSourceNode) {
-            try { currentSourceNode.stop(); } catch(e){}
+        // 1. Cancela qualquer agendamento de retry
+        clearTimeout(retryTimer); 
+        
+        // 2. FREIO DE MÃO: Cancela qualquer download pendente AGORA
+        if (downloadController) {
+            downloadController.abort();
+            downloadController = null;
         }
 
+        // 3. Para o som atual imediatamente
+        if (currentSourceNode) {
+            try { currentSourceNode.stop(); } catch(e){}
+            currentSourceNode = null;
+        }
+
+        // 4. Reset UI
         const btn = document.getElementById('btnControl');
         btn.innerText = "REINICIAR";
         btn.classList.remove("stop-mode");
         btn.disabled = false;
-        document.getElementById('status').innerText = "PARADO.";
+        document.getElementById('status').innerText = "SINAL INTERROMPIDO.";
     }
 
-    // ESSA É A NOVA MÁGICA (Função Recursiva)
+    // LÓGICA RECURSIVA BLINDADA
     async function processNextChunk() {
         if (!isPlaying) return;
 
-        // 1. Decide qual é a próxima música (Sorteio)
         const nextFile = getNextRandomFile();
         
-        // 2. Baixa ela (se já tiver no cache, é instantâneo)
         try {
-            // Se for a primeira, avisa que tá baixando
+            // Se já está no cache, avisa visualmente mas é rápido
             if (audioBuffers[nextFile]) {
-                document.getElementById('status').innerText = "TRANSMITINDO (CACHE)";
+                // document.getElementById('status').innerText = "CACHE OK";
             } else {
                 document.getElementById('status').innerText = "BAIXANDO PACOTE...";
             }
 
-            await loadFile(nextFile);
+            // AQUI ESTÁ A PROTEÇÃO: Passamos o 'signal' para poder cancelar
+            await loadFile(nextFile, downloadController.signal);
             
-            // 3. Toca ela
-            if (!isPlaying) return; // Checa se não parou enquanto baixava
+            // Checagem Dupla: Se o usuário clicou STOP enquanto baixava
+            if (!isPlaying) return; 
+
             playAndScheduleNext(nextFile);
 
         } catch (e) {
-            console.error("Erro no download", e);
-            document.getElementById('status').innerText = "ERRO DE REDE. TENTANDO...";
-            // Tenta de novo em 1s se der erro
-            lookaheadTimer = setTimeout(processNextChunk, 1000); 
+            // Se o erro foi "AbortError", é porque o usuário clicou STOP. Ignora.
+            if (e.name === 'AbortError') {
+                console.log("Download cancelado pelo usuário.");
+                return;
+            }
+
+            console.error("Erro de rede:", e);
+            if (isPlaying) {
+                document.getElementById('status').innerText = "ERRO REDE. TENTANDO...";
+                retryTimer = setTimeout(processNextChunk, 1000); 
+            }
         }
     }
 
     function playAndScheduleNext(filename) {
+        if (!isPlaying) return;
+
         const buffer = audioBuffers[filename];
         const duration = buffer.duration;
         
-        // Se o tempo agendado já passou (internet lenta), toca AGORA.
-        // Se não, toca no tempo certo para ficar sem buraco.
+        // Sincronia Adaptativa
         let playTime = nextNoteTime;
         if (playTime < audioCtx.currentTime) {
-            playTime = audioCtx.currentTime;
+            playTime = audioCtx.currentTime; // Toca agora se estiver atrasado
         }
 
         playBuffer(filename, playTime);
         
-        // Atualiza Log
+        // Atualiza UI
         let isAI = filename.includes("VAR");
         updateLog(isAI);
         document.getElementById('status').innerText = "TRANSMITINDO";
 
-        // Prepara o tempo para a PRÓXIMA música
+        // Prepara tempo da próxima
         nextNoteTime = playTime + duration;
 
-        // --- O PULO DO GATO ---
-        // Assim que essa começar a tocar, já chamamos a função para baixar a próxima.
-        // O await do download vai acontecer enquanto essa música toca.
+        // Chama a próxima recursivamente
         processNextChunk(); 
     }
 
     // --- FERRAMENTAS ---
 
-    async function loadFile(filename) {
-        if (audioBuffers[filename]) return; // Já tem? Retorna.
+    async function loadFile(filename, abortSignal) {
+        if (audioBuffers[filename]) return; 
 
-        const response = await fetch(filename);
+        // O fetch agora aceita o sinal de abortar
+        const response = await fetch(filename, { signal: abortSignal });
+        
         if (!response.ok) throw new Error(`404: ${filename}`);
+        
         const arrayBuffer = await response.arrayBuffer();
+        
+        // Decodificação (Atenção: decodeAudioData não aceita abort signal em todos browsers, 
+        // mas se pararmos a lógica principal, o resultado é descartado)
+        if (!isPlaying) return; 
         audioBuffers[filename] = await audioCtx.decodeAudioData(arrayBuffer);
     }
 
     function playBuffer(key, time) {
-        if (!audioBuffers[key]) return;
+        // Última verificação de segurança
+        if (!isPlaying || !audioBuffers[key]) return;
+
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffers[key];
         source.connect(audioCtx.destination);
         source.start(time);
         currentSourceNode = source; 
+        
+        // Limpa a referência quando acabar (opcional, para limpeza)
+        source.onended = () => {
+            if (currentSourceNode === source) currentSourceNode = null;
+        };
     }
 
     function getNextRandomFile() {
-        // Pega o bloco (A_01) - no futuro pode ter lógica pra mudar de bloco
-        // Como só tem 1 bloco, pegamos o índice 0 sempre
         const blockConfig = songStructure[0]; 
         
-        // Lógica do Shuffle Bag (Saco de Sorteio)
         let bag = shuffleBags[blockConfig.name];
         if (!bag || bag.length === 0) {
-            // Enche o saco
             bag = [];
             let totalOptions = 1 + blockConfig.variations;
             for (let i = 0; i < totalOptions; i++) bag.push(i);
-            // Embaralha
             for (let i = bag.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [bag[i], bag[j]] = [bag[j], bag[i]];
@@ -236,7 +271,6 @@
         }
 
         let choice = bag.pop();
-        
         if (choice === 0) return `${blockConfig.name}_ORG.mp3`;
         return `${blockConfig.name}_VAR_${choice}.mp3`;
     }
