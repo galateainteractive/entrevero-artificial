@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Entrevero - Caos Infinito</title>
+    <title>Entrevero - Caos Infinito (Turbo)</title>
     <style>
         body {
             background-color: #1a1a1a;
@@ -65,7 +65,7 @@
             overflow-y: hidden;
             border-top: 1px solid #444;
             padding-top: 10px;
-            text-align: center; /* Centralizado para ficar mais abstrato */
+            text-align: center; 
             display: flex;
             flex-direction: column-reverse; 
         }
@@ -120,7 +120,7 @@
         }
     }
 
-    // 2. INICIALIZAÇÃO
+    // 2. INICIALIZAÇÃO OTIMIZADA (TURBO)
     async function initAudio() {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         
@@ -131,17 +131,28 @@
         } catch (e) {
             console.error(e);
             document.getElementById('status').innerText = "ERRO: ARQUIVOS 404";
+            alert("Erro ao baixar arquivos. Verifique o console.");
         }
     }
 
     async function loadAllFiles() {
+        // Cria uma lista de tarefas de download
+        let downloadTasks = [];
+
         for (let block of songStructure) {
             shuffleBags[block.name] = []; 
-            await loadFile(`${block.name}_ORG.mp3`);
+            
+            // Adiciona o Original na lista de tarefas
+            downloadTasks.push(loadFile(`${block.name}_ORG.mp3`));
+            
+            // Adiciona todas as variações na lista
             for (let i = 1; i <= block.variations; i++) {
-                await loadFile(`${block.name}_VAR_${i}.mp3`);
+                downloadTasks.push(loadFile(`${block.name}_VAR_${i}.mp3`));
             }
         }
+
+        // DISPARA TUDO DE UMA VEZ E ESPERA TODOS TERMINAREM
+        await Promise.all(downloadTasks);
     }
 
     async function loadFile(filename) {
@@ -163,7 +174,7 @@
         btn.innerText = "INTERROMPER";
         btn.classList.add("stop-mode");
         document.getElementById('status').innerText = "SINTONIZANDO...";
-        document.getElementById('log').innerHTML = ""; // Limpa o log ao começar
+        document.getElementById('log').innerHTML = ""; 
 
         scheduler();
     }
@@ -211,7 +222,6 @@
         let choice = bag.pop();
         let filename;
         
-        // Define o arquivo (sem se importar com rótulos)
         if (choice === 0) {
             filename = `${blockConfig.name}_ORG.mp3`;
         } else {
@@ -219,8 +229,6 @@
         }
 
         playBuffer(filename, nextNoteTime);
-        
-        // Log abstrato: passa 'true' se for IA (choice > 0) apenas para definir a cor
         updateLog(choice > 0); 
 
         let buffer = audioBuffers[filename];
@@ -245,10 +253,8 @@
         const log = document.getElementById('log');
         document.getElementById('status').innerText = "TRANSMITINDO";
         
-        // Visual abstrato: muda a cor mas o texto é apenas símbolos
         const color = isAI ? "#ff0055" : "#00ff41"; 
         
-        // Gera uma linha de "onda" aleatória para dar sensação de atividade
         let wave = "";
         let len = Math.floor(Math.random() * 10) + 5;
         for(let i=0; i<len; i++) wave += "|";
