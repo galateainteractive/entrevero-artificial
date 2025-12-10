@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Entrevero - Player Generativo</title>
+    <title>Entrevero - Caos Infinito</title>
     <style>
         body {
             background-color: #1a1a1a;
@@ -14,225 +14,250 @@
             justify-content: center;
             height: 100vh;
             margin: 0;
+            user-select: none;
         }
 
-        h1 {
-            margin-bottom: 10px;
-        }
+        h1 { margin-bottom: 10px; letter-spacing: 2px; }
 
         .controls {
             border: 1px solid #333;
-            padding: 20px;
+            padding: 30px;
             background: #222;
             border-radius: 8px;
             text-align: center;
-            width: 300px;
+            width: 320px;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.2);
         }
 
         button {
             background: #00ff41;
             color: #000;
             border: none;
-            padding: 15px 30px;
-            font-size: 18px;
-            font-weight: bold;
+            padding: 20px 40px;
+            font-size: 20px;
+            font-weight: 900;
             cursor: pointer;
             margin-bottom: 20px;
             text-transform: uppercase;
-        }
-
-            button:hover {
-                background: #fff;
-            }
-
-            button:disabled {
-                background: #555;
-                cursor: not-allowed;
-            }
-
-        .slider-container {
-            margin: 20px 0;
-        }
-
-        input[type=range] {
             width: 100%;
+            transition: all 0.2s;
         }
+
+        button:hover {
+            background: #fff;
+            transform: scale(1.02);
+        }
+
+        button:active { transform: scale(0.98); }
+
+        /* Estilo para quando o botão for de PARAR */
+        button.stop-mode {
+            background: #ff0055;
+            color: #fff;
+        }
+
+        #status { margin-bottom: 15px; font-weight: bold; }
 
         #log {
-            margin-top: 20px;
-            font-size: 14px;
-            color: #fff;
-            min-height: 60px;
-            border-top: 1px dashed #555;
+            font-size: 12px;
+            color: #888;
+            height: 150px;
+            overflow-y: hidden;
+            border-top: 1px solid #444;
             padding-top: 10px;
-        }
-
-        .playing-now {
-            color: #00ff41;
-            font-weight: bold;
+            text-align: left;
+            display: flex;
+            flex-direction: column-reverse; /* Log novo aparece em cima */
         }
     </style>
 </head>
 <body>
 
-    <h1>ENTREVERO_GEN_v0.1</h1>
+    <h1>ENTREVERO_AI</h1>
 
     <div class="controls">
-        <button id="btnPlay" onclick="initAudio()">CARREGAR E TOCAR</button>
-
-        <div class="slider-container">
-            <label for="chaosLevel">N�vel de Caos (IA): <span id="chaosVal">0</span>%</label>
-            <br>
-            <input type="range" id="chaosLevel" min="0" max="100" value="0" oninput="updateChaos(this.value)">
-        </div>
-
-        <div id="status">Aguardando in�cio...</div>
-        <div id="log"></div>
+        <button id="btnControl" onclick="togglePlay()">CARREGAR</button>
+        
+        <div id="status">Sistema em espera...</div>
+        <div id="log">Logs aparecerão aqui...</div>
     </div>
 
     <script>
-    // --- CONFIGURA��O DA M�SICA ---
-    // Aqui voc� define a estrutura.
-    // 'name': prefixo do arquivo
-    // 'variations': quantas vers�es de IA existem para este trecho (ex: VAR_1, VAR_2)
-        const songStructure = [
-            // Voc� tem o A_01_ORG + 19 varia��es (VAR_1 at� VAR_19)
-            { name: "A_01", variations: 19 },
-        ];
+    // --- CONFIGURAÇÃO ---
+    // Ajuste aqui conforme seus arquivos
+    const songStructure = [
+        { name: "A_01", variations: 19 }, // 1 Original + 19 Variações
+    ];
 
-    // --- VARI�VEIS DO SISTEMA ---
+    // --- VARIÁVEIS GLOBAIS ---
     let audioCtx;
-    let audioBuffers = {}; // Armazena os sons carregados
+    let audioBuffers = {};
     let isPlaying = false;
+    let isLoaded = false;
     let currentBlockIndex = 0;
     let nextNoteTime = 0;
-    let chaosPercentage = 0; // 0 a 100
     let timerID;
+    let currentSourceNode = null; // Para poder parar o som atual
 
-    function updateChaos(val) {
-        chaosPercentage = val;
-        document.getElementById('chaosVal').innerText = val;
-    }
+    // 1. CONTROLE PRINCIPAL (PLAY / STOP)
+    async function togglePlay() {
+        const btn = document.getElementById('btnControl');
 
-    // 1. INICIALIZA��O E CARREGAMENTO
-    async function initAudio() {
-        const btn = document.getElementById('btnPlay');
-        btn.disabled = true;
-        btn.innerText = "CARREGANDO...";
-
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-        try {
-            document.getElementById('status').innerText = "Baixando arquivos...";
-            await loadAllFiles();
-
-            document.getElementById('status').innerText = "TOCANDO";
-            btn.innerText = "RODANDO...";
-
-            // Inicia o loop
-            nextNoteTime = audioCtx.currentTime + 0.1;
-            scheduler();
-        } catch (e) {
-            console.error(e);
-            document.getElementById('status').innerText = "ERRO: Arquivos n�o encontrados na pasta.";
+        // Se ainda não carregou, carrega primeiro
+        if (!isLoaded) {
+            btn.disabled = true;
+            btn.innerText = "BAIXANDO...";
+            await initAudio();
+            isLoaded = true;
             btn.disabled = false;
+            // Auto-play após carregar
+            startPlayback(); 
+            return;
+        }
+
+        // Se já está tocando, PARA.
+        if (isPlaying) {
+            stopPlayback();
+        } else {
+            // Se está parado, TOCA.
+            startPlayback();
         }
     }
 
-    // Carrega todos os arquivos definidos na estrutura
+    // 2. INICIALIZAÇÃO E DOWNLOAD
+    async function initAudio() {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        try {
+            document.getElementById('status').innerText = "Baixando arquivos...";
+            await loadAllFiles();
+            document.getElementById('status').innerText = "Pronto.";
+        } catch (e) {
+            console.error(e);
+            document.getElementById('status').innerText = "ERRO: Arquivos faltando.";
+        }
+    }
+
     async function loadAllFiles() {
         for (let block of songStructure) {
-            // Carrega Original (ORG)
-            let orgName = `${block.name}_ORG.mp3`;
-            await loadFile(orgName);
-
-            // Carrega Varia��es (VAR)
+            // Carrega Original
+            await loadFile(`${block.name}_ORG.mp3`);
+            // Carrega Variações
             for (let i = 1; i <= block.variations; i++) {
-                let varName = `${block.name}_VAR_${i}.mp3`;
-                await loadFile(varName);
+                await loadFile(`${block.name}_VAR_${i}.mp3`);
             }
         }
     }
 
     async function loadFile(filename) {
         const response = await fetch(filename);
-        if (!response.ok) throw new Error(`Arquivo n�o encontrado: ${filename}`);
+        if (!response.ok) throw new Error(`404: ${filename}`);
         const arrayBuffer = await response.arrayBuffer();
-        const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-        audioBuffers[filename] = audioBuffer;
-        console.log("Carregado: " + filename);
+        audioBuffers[filename] = await audioCtx.decodeAudioData(arrayBuffer);
+        console.log("OK: " + filename);
     }
 
-    // 2. O MOTOR DE �UDIO (Scheduler)
+    // 3. LOGICA DE START / STOP
+    function startPlayback() {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        
+        isPlaying = true;
+        currentBlockIndex = 0; // Reinicia do começo da música
+        nextNoteTime = audioCtx.currentTime + 0.1;
+        
+        // Atualiza Botão
+        const btn = document.getElementById('btnControl');
+        btn.innerText = "PARAR";
+        btn.classList.add("stop-mode"); // Fica vermelho
+        document.getElementById('status').innerText = "GERANDO...";
+
+        scheduler();
+    }
+
+    function stopPlayback() {
+        isPlaying = false;
+        clearTimeout(timerID);
+        
+        // Mata o som atual imediatamente
+        if (currentSourceNode) {
+            try { currentSourceNode.stop(); } catch(e){}
+        }
+
+        // Atualiza Botão
+        const btn = document.getElementById('btnControl');
+        btn.innerText = "TOCAR NOVAMENTE";
+        btn.classList.remove("stop-mode"); // Volta a ser verde
+        document.getElementById('status').innerText = "Parado.";
+    }
+
+    // 4. MOTOR DE DECISÃO (SCHEDULER)
     function scheduler() {
-        // Enquanto houver tempo para agendar o pr�ximo bloco e n�o tiver acabado a m�sica
-        while (nextNoteTime < audioCtx.currentTime + 1.5 && currentBlockIndex < songStructure.length) {
+        if (!isPlaying) return;
+
+        while (nextNoteTime < audioCtx.currentTime + 1.5) {
             scheduleNextBlock();
         }
+        
+        timerID = setTimeout(scheduler, 100);
+    }
 
-        // Verifica de novo em breve
-        if (currentBlockIndex < songStructure.length) {
-            timerID = setTimeout(scheduler, 100);
+    function scheduleNextBlock() {
+        const blockConfig = songStructure[currentBlockIndex];
+        
+        // --- NOVA LÓGICA DE SORTEIO (TOTALMENTE ALEATÓRIO) ---
+        // Total de opções = 1 (Original) + N (Variações)
+        let totalOptions = 1 + blockConfig.variations;
+        
+        // Sorteia um número de 0 até totalOptions-1
+        let choice = Math.floor(Math.random() * totalOptions);
+        
+        let filename;
+        let typeLabel;
+
+        if (choice === 0) {
+            // Caiu no zero = Toca Original
+            filename = `${blockConfig.name}_ORG.mp3`;
+            typeLabel = "ORIGINAL (HUMANO)";
         } else {
-            document.getElementById('status').innerText = "FIM DA M�SICA";
+            // Caiu em qualquer outro = Toca a Variação correspondente
+            // Ex: Se choice for 1, toca VAR_1. Se choice for 5, toca VAR_5.
+            filename = `${blockConfig.name}_VAR_${choice}.mp3`;
+            typeLabel = `IA VARIAÇÃO ${choice}`;
+        }
+
+        playBuffer(filename, nextNoteTime);
+        updateLog(blockConfig.name, filename, typeLabel);
+
+        // Prepara o tempo do próximo
+        let buffer = audioBuffers[filename];
+        nextNoteTime += buffer.duration; 
+
+        // Loop Infinito
+        currentBlockIndex++;
+        if (currentBlockIndex >= songStructure.length) {
+            currentBlockIndex = 0;
         }
     }
 
-        function scheduleNextBlock() {
-            const blockConfig = songStructure[currentBlockIndex];
-
-            // Lógica da Decisão (Humano vs IA)
-            let selectedType = "ORG";
-            let variationId = "";
-
-            // Rola o dado (0 a 100)
-            let dice = Math.random() * 100;
-
-            if (dice < chaosPercentage && blockConfig.variations > 0) {
-                selectedType = "VAR";
-                // Sorteia qual variação (se tiver mais de 1)
-                let varNum = Math.floor(Math.random() * blockConfig.variations) + 1;
-                variationId = `_${varNum}`;
-            }
-
-            // Monta o nome do arquivo final
-            let filename = `${blockConfig.name}_${selectedType}${variationId}.mp3`;
-
-            // Toca o som
-            playBuffer(filename, nextNoteTime);
-
-            // Atualiza log visual
-            updateLog(blockConfig.name, filename);
-
-            // Define quando começa o próximo (soma a duração do atual)
-            let buffer = audioBuffers[filename];
-            nextNoteTime += buffer.duration;
-
-            // Avança o índice
-            currentBlockIndex++;
-
-            // --- AQUI ESTÁ A MÁGICA DO LOOP ---
-            // Se chegou no fim da lista, volta para o zero
-            if (currentBlockIndex >= songStructure.length) {
-                currentBlockIndex = 0;
-            }
-        }
-
     function playBuffer(key, time) {
-        if (!audioBuffers[key]) {
-            console.error("Buffer n�o encontrado: " + key);
-            return;
-        }
+        if (!audioBuffers[key]) return;
+        
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffers[key];
         source.connect(audioCtx.destination);
         source.start(time);
+        
+        // Salva referência para poder parar depois se clicar no botão stop
+        // (Nota: isso salva apenas o último agendado, o que é ok para stop imediato)
+        currentSourceNode = source; 
     }
 
-    function updateLog(section, file) {
+    function updateLog(section, file, label) {
         const log = document.getElementById('log');
-        const color = file.includes("VAR") ? "#ff0055" : "#00ff41"; // Vermelho p/ IA, Verde p/ Org
-        log.innerHTML = `> Se��o ${section}: <span style="color:${color}">${file}</span><br>` + log.innerHTML;
+        const color = label.includes("IA") ? "#ff0055" : "#00ff41"; 
+        
+        // Adiciona linha nova no topo
+        log.innerHTML = `> [${section}] <span style="color:${color}">${label}</span><br>` + log.innerHTML;
     }
 
     </script>
