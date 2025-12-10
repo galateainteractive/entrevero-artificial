@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Entrevero - Player Estável</title>
+    <title>Entrevero - Player Estável v3.1</title>
     <style>
         body {
             background-color: #1a1a1a;
@@ -87,19 +87,19 @@
 
     // --- VARIÁVEIS DO SISTEMA ---
     let audioCtx;
-    let audioBuffers = {}; // Cache
+    let audioBuffers = {}; 
     let isPlaying = false;
     let nextNoteTime = 0;
-    let currentSourceNode = null;
+    
+    // MUDANÇA: Lista de sons ativos em vez de apenas um
+    let activeSources = []; 
+
     let shuffleBags = {}; 
     let retryTimer;
-    
-    // O "Freio de Mão" para downloads
     let downloadController = null; 
 
     // 1. CONTROLE PRINCIPAL
     function togglePlay() {
-        // Inicializa AudioContext no primeiro clique (regra dos navegadores)
         if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         
         if (isPlaying) {
@@ -116,10 +116,8 @@
         isPlaying = true;
         nextNoteTime = audioCtx.currentTime + 0.1; 
         
-        // Reinicia o controlador de downloads
         downloadController = new AbortController();
 
-        // UI Update
         const btn = document.getElementById('btnControl');
         btn.innerText = "PARAR";
         btn.classList.add("stop-mode");
@@ -128,27 +126,26 @@
         document.getElementById('status').innerText = "INICIANDO BUFFER...";
         document.getElementById('log').innerHTML = ""; 
 
-        // Começa o ciclo
         processNextChunk();
     }
 
     function stopPlayback() {
         isPlaying = false;
         
-        // 1. Cancela qualquer agendamento de retry
+        // 1. Cancela retentativas
         clearTimeout(retryTimer); 
         
-        // 2. FREIO DE MÃO: Cancela qualquer download pendente AGORA
+        // 2. Cancela downloads
         if (downloadController) {
             downloadController.abort();
             downloadController = null;
         }
 
-        // 3. Para o som atual imediatamente
-        if (currentSourceNode) {
-            try { currentSourceNode.stop(); } catch(e){}
-            currentSourceNode = null;
-        }
+        // 3. MATA TODOS OS SONS ATIVOS (Correção do bug)
+        activeSources.forEach(source => {
+            try { source.stop(); } catch(e) {}
+        });
+        activeSources = []; // Limpa a lista
 
         // 4. Reset UI
         const btn = document.getElementById('btnControl');
@@ -158,34 +155,24 @@
         document.getElementById('status').innerText = "SINAL INTERROMPIDO.";
     }
 
-    // LÓGICA RECURSIVA BLINDADA
     async function processNextChunk() {
         if (!isPlaying) return;
 
         const nextFile = getNextRandomFile();
         
         try {
-            // Se já está no cache, avisa visualmente mas é rápido
-            if (audioBuffers[nextFile]) {
-                // document.getElementById('status').innerText = "CACHE OK";
-            } else {
+            if (!audioBuffers[nextFile]) {
                 document.getElementById('status').innerText = "BAIXANDO PACOTE...";
             }
 
-            // AQUI ESTÁ A PROTEÇÃO: Passamos o 'signal' para poder cancelar
             await loadFile(nextFile, downloadController.signal);
             
-            // Checagem Dupla: Se o usuário clicou STOP enquanto baixava
             if (!isPlaying) return; 
 
             playAndScheduleNext(nextFile);
 
         } catch (e) {
-            // Se o erro foi "AbortError", é porque o usuário clicou STOP. Ignora.
-            if (e.name === 'AbortError') {
-                console.log("Download cancelado pelo usuário.");
-                return;
-            }
+            if (e.name === 'AbortError') return;
 
             console.error("Erro de rede:", e);
             if (isPlaying) {
@@ -201,23 +188,18 @@
         const buffer = audioBuffers[filename];
         const duration = buffer.duration;
         
-        // Sincronia Adaptativa
         let playTime = nextNoteTime;
         if (playTime < audioCtx.currentTime) {
-            playTime = audioCtx.currentTime; // Toca agora se estiver atrasado
+            playTime = audioCtx.currentTime; 
         }
 
         playBuffer(filename, playTime);
         
-        // Atualiza UI
         let isAI = filename.includes("VAR");
         updateLog(isAI);
         document.getElementById('status').innerText = "TRANSMITINDO";
 
-        // Prepara tempo da próxima
         nextNoteTime = playTime + duration;
-
-        // Chama a próxima recursivamente
         processNextChunk(); 
     }
 
@@ -226,32 +208,31 @@
     async function loadFile(filename, abortSignal) {
         if (audioBuffers[filename]) return; 
 
-        // O fetch agora aceita o sinal de abortar
         const response = await fetch(filename, { signal: abortSignal });
-        
         if (!response.ok) throw new Error(`404: ${filename}`);
-        
         const arrayBuffer = await response.arrayBuffer();
         
-        // Decodificação (Atenção: decodeAudioData não aceita abort signal em todos browsers, 
-        // mas se pararmos a lógica principal, o resultado é descartado)
         if (!isPlaying) return; 
         audioBuffers[filename] = await audioCtx.decodeAudioData(arrayBuffer);
     }
 
     function playBuffer(key, time) {
-        // Última verificação de segurança
         if (!isPlaying || !audioBuffers[key]) return;
 
         const source = audioCtx.createBufferSource();
         source.buffer = audioBuffers[key];
         source.connect(audioCtx.destination);
         source.start(time);
-        currentSourceNode = source; 
         
-        // Limpa a referência quando acabar (opcional, para limpeza)
+        // MUDANÇA: Adiciona à lista de ativos
+        activeSources.push(source);
+        
+        // Limpeza automática: Quando o som acabar, remove ele da lista
         source.onended = () => {
-            if (currentSourceNode === source) currentSourceNode = null;
+            const index = activeSources.indexOf(source);
+            if (index > -1) {
+                activeSources.splice(index, 1);
+            }
         };
     }
 
