@@ -119,29 +119,29 @@
 
     <script>
     // --- CONFIGURAÇÃO ---
-    // IMPORTANTE: Ajuste o "totalFiles" para a quantidade exata de arquivos em cada pasta.
+    // label: Texto do botão (agora igual ao nome da pasta)
     const playlistConfig = [
         { 
-            label: "MÓDULO A (INÍCIO)", 
+            label: "modulo_a", 
             folder: "modulo_a", 
             prefix: "A_01", 
-            totalFiles: 10 // <--- MUDE AQUI PARA A QUANTIDADE REAL
+            totalFiles: 10 // <--- LEMBRE DE AJUSTAR ESSE NÚMERO
         },
         { 
-            label: "MÓDULO B (MEIO)", 
+            label: "modulo_b", 
             folder: "modulo_b", 
             prefix: "B_01", 
-            totalFiles: 10 // <--- MUDE AQUI PARA A QUANTIDADE REAL
+            totalFiles: 10 
         },
         { 
-            label: "MÓDULO C (FIM)", 
+            label: "modulo_c", 
             folder: "modulo_c", 
             prefix: "C_01", 
-            totalFiles: 10 // <--- MUDE AQUI PARA A QUANTIDADE REAL
+            totalFiles: 10 
         },
     ];
 
-    // --- VARIÁVEIS DO SISTEMA ---
+    // --- VARIÁVEIS ---
     let audioCtx;
     let isPlaying = false;
     let currentSource = null;
@@ -153,8 +153,7 @@
     // --- INICIALIZAÇÃO ---
     window.onload = function() {
         createTrackButtons();
-        document.getElementById('status').innerText = "AGUARDANDO INÍCIO...";
-        // Inicializa contexto de áudio
+        document.getElementById('status').innerText = "AGUARDANDO...";
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         audioCtx = new AudioContext();
         preloadNextTrack(); 
@@ -162,7 +161,7 @@
 
     function createTrackButtons() {
         const container = document.getElementById('trackList');
-        container.innerHTML = ""; // Limpa antes de criar
+        container.innerHTML = "";
         playlistConfig.forEach((track, index) => {
             let btn = document.createElement('button');
             btn.className = 'track-btn';
@@ -178,17 +177,12 @@
     function changeTrack(index) {
         if (index === currentTrackIndex) return;
         
-        // Se estiver tocando, paramos suavemente para trocar o contexto
         stopNow(); 
-        
         currentTrackIndex = index;
         updateButtonsVisual();
         
-        // Limpa o buffer antigo para não tocar a música do módulo anterior
         nextBuffer = null;
         document.getElementById('status').innerText = "MÓDULO ALTERADO";
-        
-        // Carrega o novo som imediatamente
         preloadNextTrack(); 
     }
 
@@ -202,7 +196,6 @@
 
     // --- CONTROLE PRINCIPAL ---
     function togglePlay() {
-        // Navegadores modernos exigem resume() no clique
         if (audioCtx.state === 'suspended') audioCtx.resume();
 
         if (isPlaying) {
@@ -222,7 +215,6 @@
             playBuffer(nextBuffer, nextFilename);
         } else {
             document.getElementById('status').innerText = "BUFFERING...";
-            // Se não tem buffer ainda, o preloadNextTrack vai disparar o play assim que carregar
         }
     }
 
@@ -247,17 +239,15 @@
         source.start(0);
         currentSource = source;
 
-        updateLog(filename);
+        updateLog(); // Chamada sem argumentos para gerar os riscos
         document.getElementById('status').innerText = "TRANSMITINDO...";
 
-        nextBuffer = null; // Limpa para obrigar o download do próximo
+        nextBuffer = null;
         
-        // Quando acabar, toca o próximo
         source.onended = function() {
             if (isPlaying) playNow();
         };
         
-        // Enquanto toca este, já baixa o próximo
         preloadNextTrack();
     }
 
@@ -267,66 +257,54 @@
 
         try {
             const response = await fetch(file);
-            if (!response.ok) throw new Error("Arquivo não encontrado: " + file);
+            if (!response.ok) throw new Error("404");
             const arrayBuffer = await response.arrayBuffer();
             
             audioCtx.decodeAudioData(arrayBuffer, (decodedBuffer) => {
                 nextBuffer = decodedBuffer;
-                
-                // Se o usuário deu play mas o buffer não estava pronto, toca agora
                 if (isPlaying && !currentSource) playNow();
-                
-                // Apenas update visual se estiver parado
                 if (!isPlaying) document.getElementById('status').innerText = "PRONTO.";
             });
 
         } catch (e) {
-            console.error("Erro no download", e);
-            updateLog("ERRO: " + file);
-            // Tenta outro arquivo em 1 segundo se der erro (ex: arquivo faltando)
+            console.error("Erro download", e);
             setTimeout(preloadNextTrack, 1000);
         }
     }
 
-    // --- LÓGICA DE SORTEIO E NOMES DE ARQUIVO ---
+    // --- SORTEIO ---
     function getNextRandomFile() {
         const trackConfig = playlistConfig[currentTrackIndex];
         
-        // Garante que o "saco de sorteio" (shuffle bag) existe para esse módulo
         if (!shuffleBags[trackConfig.label]) {
             shuffleBags[trackConfig.label] = [];
         }
         let bag = shuffleBags[trackConfig.label];
 
-        // Enche o saco se vazio (números de 1 até totalFiles)
         if (bag.length === 0) {
             for (let i = 1; i <= trackConfig.totalFiles; i++) bag.push(i);
-            // Embaralha (Fisher-Yates shuffle)
             for (let i = bag.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [bag[i], bag[j]] = [bag[j], bag[i]];
             }
         }
 
-        // Tira um número do saco
         let choice = bag.pop();
-        
-        // MONTAGEM DO CAMINHO DO ARQUIVO
-        // Padrão esperado: pasta/PREFIXO_VAR_Numero.mp3
-        // Exemplo: modulo_a/A_01_VAR_1.mp3
         let folderPath = trackConfig.folder ? trackConfig.folder + "/" : "";
         return `${folderPath}${trackConfig.prefix}_VAR_${choice}.mp3`;
     }
 
-    function updateLog(text) {
+    // --- LOG VISUAL (Risquinhos) ---
+    function updateLog() {
         const log = document.getElementById('log');
         const colors = ["#00ff41", "#ff0055", "#00ccff", "#ffff00"];
         const randomColor = colors[Math.floor(Math.random() * colors.length)];
         
-        // Só mostra o nome do arquivo, removendo o caminho da pasta para ficar mais limpo
-        const cleanName = text.split('/').pop();
-
-        log.innerHTML = `<div style="color:${randomColor}; opacity:0.8;">> ${cleanName}</div>` + log.innerHTML;
+        let wave = "";
+        let len = Math.floor(Math.random() * 10) + 5; // Tamanho aleatório
+        for(let i=0; i<len; i++) wave += "|"; // Caractere visual
+        
+        log.innerHTML = `<div style="color:${randomColor}; letter-spacing:3px; opacity:0.7;">${wave}</div>` + log.innerHTML;
     }
 
     </script>
