@@ -2,8 +2,13 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Entrevero - Multi-Realidades</title>
     <style>
+        * {
+            box-sizing: border-box; /* Garante que as medidas não estourem a tela */
+        }
+
         body {
             background-color: #1a1a1a;
             color: #00ff41; 
@@ -12,20 +17,31 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            height: 100vh;
+            min-height: 100vh; /* min-height evita cortes em telas pequenas */
             margin: 0;
+            padding: 20px; /* Margem de segurança nas bordas do celular */
             user-select: none;
+            -webkit-tap-highlight-color: transparent; /* Remove flash azul ao clicar no iPhone */
         }
 
-        h1 { margin-bottom: 20px; letter-spacing: 2px; }
+        h1 { 
+            margin-bottom: 20px; 
+            letter-spacing: 2px;
+            font-size: 1.8rem; /* Fonte ajustável */
+            text-align: center;
+        }
 
         .main-container {
             border: 1px solid #333;
-            padding: 30px;
+            padding: 25px;
             background: #222;
             border-radius: 8px;
             text-align: center;
-            width: 340px;
+            
+            /* 2. LARGURA RESPONSIVA AQUI */
+            width: 100%;       /* Tenta ocupar tudo */
+            max-width: 360px;  /* Mas para em 360px pra não ficar gigante no PC */
+            
             box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
         }
 
@@ -42,6 +58,7 @@
             text-transform: uppercase;
             transition: all 0.2s;
             border-radius: 4px;
+            touch-action: manipulation; /* Melhora resposta do toque */
         }
         #btnControl:hover { background: #fff; transform: scale(1.02); }
         #btnControl:active { transform: scale(0.98); }
@@ -72,7 +89,7 @@
             background: transparent;
             border: 1px solid #00ff41;
             color: #00ff41;
-            padding: 10px;
+            padding: 12px; /* Botão um pouco maior para o dedo */
             cursor: pointer;
             font-family: 'Courier New', Courier, monospace;
             font-size: 14px;
@@ -119,13 +136,12 @@
 
     <script>
     // --- CONFIGURAÇÃO ---
-    // label: Texto do botão (agora igual ao nome da pasta)
     const playlistConfig = [
         { 
             label: "modulo_a", 
             folder: "modulo_a", 
             prefix: "A_01", 
-            totalFiles: 10 // <--- LEMBRE DE AJUSTAR ESSE NÚMERO
+            totalFiles: 10 // <--- VERIFIQUE A QUANTIDADE REAL
         },
         { 
             label: "modulo_b", 
@@ -176,11 +192,9 @@
     // --- MUDANÇA DE FAIXA ---
     function changeTrack(index) {
         if (index === currentTrackIndex) return;
-        
         stopNow(); 
         currentTrackIndex = index;
         updateButtonsVisual();
-        
         nextBuffer = null;
         document.getElementById('status').innerText = "MÓDULO ALTERADO";
         preloadNextTrack(); 
@@ -197,12 +211,8 @@
     // --- CONTROLE PRINCIPAL ---
     function togglePlay() {
         if (audioCtx.state === 'suspended') audioCtx.resume();
-
-        if (isPlaying) {
-            stopNow();
-        } else {
-            playNow();
-        }
+        if (isPlaying) stopNow();
+        else playNow();
     }
 
     function playNow() {
@@ -239,33 +249,26 @@
         source.start(0);
         currentSource = source;
 
-        updateLog(); // Chamada sem argumentos para gerar os riscos
+        updateLog(); 
         document.getElementById('status').innerText = "TRANSMITINDO...";
 
         nextBuffer = null;
-        
-        source.onended = function() {
-            if (isPlaying) playNow();
-        };
-        
+        source.onended = function() { if (isPlaying) playNow(); };
         preloadNextTrack();
     }
 
     async function preloadNextTrack() {
         const file = getNextRandomFile();
         nextFilename = file; 
-
         try {
             const response = await fetch(file);
             if (!response.ok) throw new Error("404");
             const arrayBuffer = await response.arrayBuffer();
-            
             audioCtx.decodeAudioData(arrayBuffer, (decodedBuffer) => {
                 nextBuffer = decodedBuffer;
                 if (isPlaying && !currentSource) playNow();
                 if (!isPlaying) document.getElementById('status').innerText = "PRONTO.";
             });
-
         } catch (e) {
             console.error("Erro download", e);
             setTimeout(preloadNextTrack, 1000);
@@ -275,10 +278,7 @@
     // --- SORTEIO ---
     function getNextRandomFile() {
         const trackConfig = playlistConfig[currentTrackIndex];
-        
-        if (!shuffleBags[trackConfig.label]) {
-            shuffleBags[trackConfig.label] = [];
-        }
+        if (!shuffleBags[trackConfig.label]) shuffleBags[trackConfig.label] = [];
         let bag = shuffleBags[trackConfig.label];
 
         if (bag.length === 0) {
@@ -288,25 +288,21 @@
                 [bag[i], bag[j]] = [bag[j], bag[i]];
             }
         }
-
         let choice = bag.pop();
         let folderPath = trackConfig.folder ? trackConfig.folder + "/" : "";
         return `${folderPath}${trackConfig.prefix}_VAR_${choice}.mp3`;
     }
 
-    // --- LOG VISUAL (Risquinhos) ---
+    // --- LOG VISUAL ---
     function updateLog() {
         const log = document.getElementById('log');
         const colors = ["#00ff41", "#ff0055", "#00ccff", "#ffff00"];
         const randomColor = colors[Math.floor(Math.random() * colors.length)];
-        
         let wave = "";
-        let len = Math.floor(Math.random() * 10) + 5; // Tamanho aleatório
-        for(let i=0; i<len; i++) wave += "|"; // Caractere visual
-        
+        let len = Math.floor(Math.random() * 10) + 5; 
+        for(let i=0; i<len; i++) wave += "|"; 
         log.innerHTML = `<div style="color:${randomColor}; letter-spacing:3px; opacity:0.7;">${wave}</div>` + log.innerHTML;
     }
-
     </script>
 </body>
 </html>
