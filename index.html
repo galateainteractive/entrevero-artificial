@@ -3,9 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    
     <title>Entrevero_AI</title>
-    
     <style>
         * { box-sizing: border-box; }
 
@@ -42,16 +40,15 @@
             box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
         }
 
-        /* --- ESTILO DA CAPA (IMAGEM) --- */
         #coverDisplay {
             width: 100%;
             height: auto;
-            aspect-ratio: 1 / 1; /* Garante que fique quadrado */
+            aspect-ratio: 1 / 1; 
             background-color: #000;
             border: 1px solid #00ff41;
             margin-bottom: 20px;
             object-fit: cover; 
-            display: none; /* Escondido até carregar */
+            display: none; 
             box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
         }
 
@@ -149,13 +146,12 @@
 
     <script>
     // --- CONFIGURAÇÃO ---
-    // totalImages: 1 (O script vai procurar sempre por cover_1.jpg na pasta)
     const playlistConfig = [
         { 
             label: "modulo_a", 
             folder: "modulo_a", 
             prefix: "A_01", 
-            totalFiles: 10,   // <--- AJUSTE A QUANTIDADE DE ÁUDIOS
+            totalFiles: 10,   // <--- AJUSTE CONFORME REALIDADE
             totalImages: 1    
         },
         { 
@@ -171,6 +167,14 @@
             prefix: "C_01", 
             totalFiles: 10,
             totalImages: 1    
+        },
+        // --- NOVO MÓDULO ADICIONADO ---
+        { 
+            label: "modulo_d", 
+            folder: "modulo_d", // Nome da pasta
+            prefix: "D_01",     // Nome dos arquivos (D_01_VAR_...)
+            totalFiles: 14,     // Vi na sua foto que vai até o 14
+            totalImages: 1      // Tem o cover_1.jpg lá
         },
     ];
 
@@ -221,7 +225,6 @@
         updateButtonsVisual();
         nextBuffer = null;
         
-        // Força o play
         isPlaying = true;
         const btn = document.getElementById('btnControl');
         btn.innerText = "PARAR";
@@ -290,7 +293,6 @@
         preloadNextTrack();
     }
 
-    // --- LÓGICA DA CAPA ÚNICA ---
     function updateCoverArt() {
         const trackConfig = playlistConfig[currentTrackIndex];
         const imgElement = document.getElementById('coverDisplay');
@@ -300,10 +302,7 @@
             return;
         }
 
-        // Como totalImages é 1, isso sempre vai dar 1
         const randomImg = Math.floor(Math.random() * trackConfig.totalImages) + 1;
-        
-        // Caminho: pasta/cover_1.jpg
         const folderPath = trackConfig.folder ? trackConfig.folder + "/" : "";
         const imagePath = `${folderPath}cover_${randomImg}.jpg`;
 
@@ -329,7 +328,6 @@
         }
     }
 
-    // --- SORTEIO DE ÁUDIO ---
     function getNextRandomFile() {
         const trackConfig = playlistConfig[currentTrackIndex];
         if (!shuffleBags[trackConfig.label]) shuffleBags[trackConfig.label] = [];
