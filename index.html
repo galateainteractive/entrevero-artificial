@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Entrevero - Player Estável v3.1</title>
+    <title>Entrevero - Smart Cache v3.2</title>
     <style>
         body {
             background-color: #1a1a1a;
@@ -87,16 +87,13 @@
 
     // --- VARIÁVEIS DO SISTEMA ---
     let audioCtx;
-    let audioBuffers = {}; 
+    let audioBuffers = {}; // O CACHE FICA AQUI E NUNCA É APAGADO
     let isPlaying = false;
     let nextNoteTime = 0;
     
-    // MUDANÇA: Lista de sons ativos em vez de apenas um
     let activeSources = []; 
-
     let shuffleBags = {}; 
     let retryTimer;
-    let downloadController = null; 
 
     // 1. CONTROLE PRINCIPAL
     function togglePlay() {
@@ -116,8 +113,6 @@
         isPlaying = true;
         nextNoteTime = audioCtx.currentTime + 0.1; 
         
-        downloadController = new AbortController();
-
         const btn = document.getElementById('btnControl');
         btn.innerText = "PARAR";
         btn.classList.add("stop-mode");
@@ -130,50 +125,55 @@
     }
 
     function stopPlayback() {
-        isPlaying = false;
+        isPlaying = false; // Isso impede novos sons de começarem
         
-        // 1. Cancela retentativas
+        // 1. Cancela tentativas futuras
         clearTimeout(retryTimer); 
         
-        // 2. Cancela downloads
-        if (downloadController) {
-            downloadController.abort();
-            downloadController = null;
-        }
-
-        // 3. MATA TODOS OS SONS ATIVOS (Correção do bug)
+        // 2. MATA SOM APENAS DO QUE ESTÁ TOCANDO (Silêncio Imediato)
         activeSources.forEach(source => {
             try { source.stop(); } catch(e) {}
         });
-        activeSources = []; // Limpa a lista
+        activeSources = [];
 
-        // 4. Reset UI
+        // NOTA: Não cancelamos mais o download (fetch). 
+        // Se estiver baixando, ele termina e salva no cache silenciosamente.
+
+        // 3. Reset UI
         const btn = document.getElementById('btnControl');
-        btn.innerText = "REINICIAR";
+        btn.innerText = "RETOMAR";
         btn.classList.remove("stop-mode");
         btn.disabled = false;
-        document.getElementById('status').innerText = "SINAL INTERROMPIDO.";
+        document.getElementById('status').innerText = "PAUSA (MEMÓRIA ATIVA)";
     }
 
     async function processNextChunk() {
+        // Se parou, não faz nada
         if (!isPlaying) return;
 
         const nextFile = getNextRandomFile();
         
         try {
-            if (!audioBuffers[nextFile]) {
-                document.getElementById('status').innerText = "BAIXANDO PACOTE...";
+            // Feedback Visual Inteligente
+            if (audioBuffers[nextFile]) {
+                // Se já tem no cache, não mostra nada ou mostra algo sutil
+            } else {
+                document.getElementById('status').innerText = "BAIXANDO DADOS...";
             }
 
-            await loadFile(nextFile, downloadController.signal);
+            // Baixa (sem AbortController, deixa terminar sempre)
+            await loadFile(nextFile);
             
-            if (!isPlaying) return; 
+            // Checagem Crucial: 
+            // O download acabou. O usuário ainda quer ouvir?
+            if (!isPlaying) {
+                console.log("Download concluído em background para cache: " + nextFile);
+                return; // Sai sem tocar
+            }
 
             playAndScheduleNext(nextFile);
 
         } catch (e) {
-            if (e.name === 'AbortError') return;
-
             console.error("Erro de rede:", e);
             if (isPlaying) {
                 document.getElementById('status').innerText = "ERRO REDE. TENTANDO...";
@@ -205,18 +205,21 @@
 
     // --- FERRAMENTAS ---
 
-    async function loadFile(filename, abortSignal) {
-        if (audioBuffers[filename]) return; 
+    async function loadFile(filename) {
+        if (audioBuffers[filename]) return; // Já tem? Retorna instantâneo.
 
-        const response = await fetch(filename, { signal: abortSignal });
+        const response = await fetch(filename);
         if (!response.ok) throw new Error(`404: ${filename}`);
         const arrayBuffer = await response.arrayBuffer();
         
-        if (!isPlaying) return; 
-        audioBuffers[filename] = await audioCtx.decodeAudioData(arrayBuffer);
+        // Decodifica e SALVA NO CACHE GLOBAL
+        // Mesmo se estiver pausado, o decode acontece para ficar pronto para depois
+        const audioData = await audioCtx.decodeAudioData(arrayBuffer);
+        audioBuffers[filename] = audioData;
     }
 
     function playBuffer(key, time) {
+        // Só toca se estiver 'Playing'
         if (!isPlaying || !audioBuffers[key]) return;
 
         const source = audioCtx.createBufferSource();
@@ -224,15 +227,11 @@
         source.connect(audioCtx.destination);
         source.start(time);
         
-        // MUDANÇA: Adiciona à lista de ativos
         activeSources.push(source);
         
-        // Limpeza automática: Quando o som acabar, remove ele da lista
         source.onended = () => {
             const index = activeSources.indexOf(source);
-            if (index > -1) {
-                activeSources.splice(index, 1);
-            }
+            if (index > -1) activeSources.splice(index, 1);
         };
     }
 
