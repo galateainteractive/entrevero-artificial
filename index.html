@@ -5,9 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Entrevero - Multi-Realidades</title>
     <style>
-        * {
-            box-sizing: border-box; /* Garante que as medidas não estourem a tela */
-        }
+        * { box-sizing: border-box; }
 
         body {
             background-color: #1a1a1a;
@@ -17,17 +15,17 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100vh; /* min-height evita cortes em telas pequenas */
+            min-height: 100vh;
             margin: 0;
-            padding: 20px; /* Margem de segurança nas bordas do celular */
+            padding: 20px;
             user-select: none;
-            -webkit-tap-highlight-color: transparent; /* Remove flash azul ao clicar no iPhone */
+            -webkit-tap-highlight-color: transparent;
         }
 
         h1 { 
             margin-bottom: 20px; 
             letter-spacing: 2px;
-            font-size: 1.8rem; /* Fonte ajustável */
+            font-size: 1.8rem; 
             text-align: center;
         }
 
@@ -37,11 +35,8 @@
             background: #222;
             border-radius: 8px;
             text-align: center;
-            
-            /* 2. LARGURA RESPONSIVA AQUI */
-            width: 100%;       /* Tenta ocupar tudo */
-            max-width: 360px;  /* Mas para em 360px pra não ficar gigante no PC */
-            
+            width: 100%;       
+            max-width: 360px;  
             box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
         }
 
@@ -58,7 +53,7 @@
             text-transform: uppercase;
             transition: all 0.2s;
             border-radius: 4px;
-            touch-action: manipulation; /* Melhora resposta do toque */
+            touch-action: manipulation;
         }
         #btnControl:hover { background: #fff; transform: scale(1.02); }
         #btnControl:active { transform: scale(0.98); }
@@ -89,7 +84,7 @@
             background: transparent;
             border: 1px solid #00ff41;
             color: #00ff41;
-            padding: 12px; /* Botão um pouco maior para o dedo */
+            padding: 12px;
             cursor: pointer;
             font-family: 'Courier New', Courier, monospace;
             font-size: 14px;
@@ -189,14 +184,32 @@
         });
     }
 
-    // --- MUDANÇA DE FAIXA ---
+    // --- MUDANÇA DE FAIXA (AGORA COM AUTO-PLAY) ---
     function changeTrack(index) {
-        if (index === currentTrackIndex) return;
-        stopNow(); 
+        if (index === currentTrackIndex && isPlaying) return; // Se já está tocando esse módulo, ignora
+        
+        // 1. Acorda o contexto de áudio (necessário para celulares)
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        // 2. Para o som atual
+        if (currentSource) {
+            try { currentSource.stop(); } catch(e) {}
+            currentSource = null;
+        }
+
+        // 3. Atualiza índices e visual
         currentTrackIndex = index;
         updateButtonsVisual();
         nextBuffer = null;
-        document.getElementById('status').innerText = "MÓDULO ALTERADO";
+        
+        // 4. FORÇA O ESTADO DE "TOCANDO"
+        isPlaying = true;
+        const btn = document.getElementById('btnControl');
+        btn.innerText = "PARAR";
+        btn.classList.add("stop-mode");
+        document.getElementById('status').innerText = "CARREGANDO...";
+
+        // 5. Carrega. Quando terminar, o preloadNextTrack vai ver que isPlaying é true e tocará sozinho.
         preloadNextTrack(); 
     }
 
@@ -266,7 +279,11 @@
             const arrayBuffer = await response.arrayBuffer();
             audioCtx.decodeAudioData(arrayBuffer, (decodedBuffer) => {
                 nextBuffer = decodedBuffer;
+                
+                // --- LÓGICA MÁGICA ---
+                // Se o usuário deu play (ou clicou no botão do módulo), toca assim que baixar
                 if (isPlaying && !currentSource) playNow();
+                
                 if (!isPlaying) document.getElementById('status').innerText = "PRONTO.";
             });
         } catch (e) {
