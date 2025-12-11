@@ -29,7 +29,6 @@
             box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
         }
 
-        /* BOTÃO PRINCIPAL */
         #btnControl {
             background: #00ff41;
             color: #000;
@@ -53,7 +52,6 @@
             box-shadow: 0 0 15px #ff0055;
         }
 
-        /* SELEÇÃO DE FAIXAS */
         .track-list-label {
             font-size: 10px;
             color: #888;
@@ -120,13 +118,13 @@
     </div>
 
     <script>
-    // --- CONFIGURAÇÃO DAS PASTAS ---
-    // folder: nome da pasta no github (deixe "" se for na raiz)
-    // prefix: nome do arquivo antes do _ORG ou _VAR (ex: "A_01")
+    // --- CONFIGURAÇÃO ---
+    // prefix: O começo do nome do arquivo (ex: "A_01" vira A_01_VAR_1.mp3)
+    // folder: Nome da pasta (ou "" se for raiz)
+    // totalFiles: Quantidade total de variações (1 até X)
     const playlistConfig = [
-        { label: "MÓDULO A (INÍCIO)", folder: "", prefix: "A_01", variations: 19 },
-        // Exemplo futuro:
-        // { label: "MÓDULO B (TEMA)", folder: "pasta_b", prefix: "B_01", variations: 10 },
+        { label: "MÓDULO A (INÍCIO)", folder: "", prefix: "A_01", totalFiles: 20 },
+        // { label: "MÓDULO B", folder: "modulo_b", prefix: "B_01", totalFiles: 15 },
     ];
 
     // --- VARIÁVEIS ---
@@ -135,14 +133,12 @@
     let currentSource = null;
     let nextBuffer = null;
     let nextFilename = ""; 
-    let currentTrackIndex = 0; // Qual botão está selecionado
+    let currentTrackIndex = 0; 
     let shuffleBags = {}; 
 
     // --- INICIALIZAÇÃO ---
     window.onload = function() {
         createTrackButtons();
-        
-        // Inicia contexto e pré-carrega
         document.getElementById('status').innerText = "PRÉ-CARREGANDO...";
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         preloadNextTrack(); 
@@ -164,15 +160,9 @@
     // --- MUDANÇA DE FAIXA ---
     function changeTrack(index) {
         if (index === currentTrackIndex) return;
-
-        // 1. Para tudo
         stopNow(); 
-
-        // 2. Atualiza índice e visual
         currentTrackIndex = index;
         updateButtonsVisual();
-
-        // 3. Limpa buffer antigo e pré-carrega o novo
         nextBuffer = null;
         document.getElementById('status').innerText = "MÓDULO ALTERADO";
         preloadNextTrack(); 
@@ -199,7 +189,6 @@
 
     function playNow() {
         isPlaying = true;
-        
         const btn = document.getElementById('btnControl');
         btn.innerText = "PARAR";
         btn.classList.add("stop-mode");
@@ -213,12 +202,10 @@
 
     function stopNow() {
         isPlaying = false;
-        
         if (currentSource) {
             try { currentSource.stop(); } catch(e) {}
             currentSource = null;
         }
-
         const btn = document.getElementById('btnControl');
         btn.innerText = "TOCAR";
         btn.classList.remove("stop-mode");
@@ -234,23 +221,19 @@
         source.start(0);
         currentSource = source;
 
-        let isAI = filename.includes("VAR");
-        updateLog(isAI);
+        updateLog(filename);
         document.getElementById('status').innerText = "TRANSMITINDO";
 
-        // Limpa o slot e avisa: quando acabar essa, chame a próxima
         nextBuffer = null;
         source.onended = function() {
             if (isPlaying) playNow();
         };
-
-        // Baixa a próxima enquanto toca
         preloadNextTrack();
     }
 
     async function preloadNextTrack() {
         const file = getNextRandomFile();
-        nextFilename = file; // Guarda nome para o log
+        nextFilename = file; 
 
         try {
             const response = await fetch(file);
@@ -259,14 +242,8 @@
             
             audioCtx.decodeAudioData(arrayBuffer, (decodedBuffer) => {
                 nextBuffer = decodedBuffer;
-                
-                // Se estava esperando (Buffering), toca agora
-                if (isPlaying && !currentSource) {
-                    playNow();
-                }
-                if (!isPlaying) {
-                    document.getElementById('status').innerText = "PRONTO.";
-                }
+                if (isPlaying && !currentSource) playNow();
+                if (!isPlaying) document.getElementById('status').innerText = "PRONTO.";
             });
 
         } catch (e) {
@@ -275,20 +252,19 @@
         }
     }
 
-    // --- SORTEIO E CAMINHOS ---
+    // --- SORTEIO COM PREFIXO ---
     function getNextRandomFile() {
-        const trackConfig = playlistConfig[currentTrackIndex]; // Pega config da faixa atual
+        const trackConfig = playlistConfig[currentTrackIndex];
         
-        // Garante que o shuffle bag existe para essa faixa
-        if (!shuffleBags[trackConfig.prefix]) {
-            shuffleBags[trackConfig.prefix] = [];
+        // Garante que o shuffle bag existe
+        if (!shuffleBags[trackConfig.label]) {
+            shuffleBags[trackConfig.label] = [];
         }
-        let bag = shuffleBags[trackConfig.prefix];
+        let bag = shuffleBags[trackConfig.label];
 
-        // Enche o saco se vazio
+        // Enche o saco se vazio (números de 1 até totalFiles)
         if (bag.length === 0) {
-            let totalOptions = 1 + trackConfig.variations;
-            for (let i = 0; i < totalOptions; i++) bag.push(i);
+            for (let i = 1; i <= trackConfig.totalFiles; i++) bag.push(i);
             // Embaralha
             for (let i = bag.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -298,20 +274,20 @@
 
         let choice = bag.pop();
         
-        // Monta o caminho (Pasta + Arquivo)
+        // Monta o caminho: pasta/PREFIXO_VAR_X.mp3
         let folderPath = trackConfig.folder ? trackConfig.folder + "/" : "";
-        
-        if (choice === 0) return `${folderPath}${trackConfig.prefix}_ORG.mp3`;
         return `${folderPath}${trackConfig.prefix}_VAR_${choice}.mp3`;
     }
 
-    function updateLog(isAI) {
+    function updateLog(filename) {
         const log = document.getElementById('log');
-        const color = isAI ? "#ff0055" : "#00ff41"; 
+        const colors = ["#00ff41", "#ff0055", "#00ccff", "#ffff00"];
+        const randomColor = colors[Math.floor(Math.random() * colors.length)];
+        
         let wave = "";
         let len = Math.floor(Math.random() * 10) + 5;
         for(let i=0; i<len; i++) wave += "|";
-        log.innerHTML = `<div style="color:${color}; letter-spacing:3px; opacity:0.7;">${wave}</div>` + log.innerHTML;
+        log.innerHTML = `<div style="color:${randomColor}; letter-spacing:3px; opacity:0.7;">${wave}</div>` + log.innerHTML;
     }
 
     </script>
