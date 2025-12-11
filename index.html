@@ -1,1 +1,319 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Entrevero - Multi-Realidades</title>
+    <style>
+        body {
+            background-color: #1a1a1a;
+            color: #00ff41; 
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            user-select: none;
+        }
 
+        h1 { margin-bottom: 20px; letter-spacing: 2px; }
+
+        .main-container {
+            border: 1px solid #333;
+            padding: 30px;
+            background: #222;
+            border-radius: 8px;
+            text-align: center;
+            width: 340px;
+            box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
+        }
+
+        /* BOTÃO PRINCIPAL */
+        #btnControl {
+            background: #00ff41;
+            color: #000;
+            border: none;
+            padding: 20px 0;
+            font-size: 22px;
+            font-weight: 900;
+            cursor: pointer;
+            width: 100%;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            transition: all 0.2s;
+            border-radius: 4px;
+        }
+        #btnControl:hover { background: #fff; transform: scale(1.02); }
+        #btnControl:active { transform: scale(0.98); }
+        
+        #btnControl.stop-mode {
+            background: #ff0055;
+            color: #fff;
+            box-shadow: 0 0 15px #ff0055;
+        }
+
+        /* SELEÇÃO DE FAIXAS */
+        .track-list-label {
+            font-size: 10px;
+            color: #888;
+            margin-bottom: 10px;
+            text-align: left;
+            border-bottom: 1px solid #444;
+            padding-bottom: 5px;
+        }
+
+        .track-buttons-container {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .track-btn {
+            background: transparent;
+            border: 1px solid #00ff41;
+            color: #00ff41;
+            padding: 10px;
+            cursor: pointer;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.2s;
+            text-transform: uppercase;
+        }
+        .track-btn:hover { background: rgba(0, 255, 65, 0.1); }
+        
+        .track-btn.active-track {
+            background: #00ff41;
+            color: #000;
+        }
+
+        #status { margin-bottom: 10px; font-weight: bold; font-size: 14px; min-height: 20px;}
+        
+        #log {
+            font-size: 11px;
+            color: #666;
+            height: 100px;
+            overflow-y: hidden;
+            border-top: 1px solid #444;
+            padding-top: 10px;
+            text-align: center;
+            display: flex;
+            flex-direction: column-reverse; 
+        }
+    </style>
+</head>
+<body>
+
+    <h1>ENTREVERO_AI</h1>
+
+    <div class="main-container">
+        <div id="status">SISTEMA ONLINE</div>
+        <button id="btnControl" onclick="togglePlay()">INICIAR</button>
+
+        <div class="track-list-label">SELECIONAR MÓDULO:</div>
+        <div class="track-buttons-container" id="trackList">
+            </div>
+
+        <div id="log"></div>
+    </div>
+
+    <script>
+    // --- CONFIGURAÇÃO DAS PASTAS ---
+    // folder: nome da pasta no github (deixe "" se for na raiz)
+    // prefix: nome do arquivo antes do _ORG ou _VAR (ex: "A_01")
+    const playlistConfig = [
+        { label: "MÓDULO A (INÍCIO)", folder: "", prefix: "A_01", variations: 19 },
+        // Exemplo futuro:
+        // { label: "MÓDULO B (TEMA)", folder: "pasta_b", prefix: "B_01", variations: 10 },
+    ];
+
+    // --- VARIÁVEIS ---
+    let audioCtx;
+    let isPlaying = false;
+    let currentSource = null;
+    let nextBuffer = null;
+    let nextFilename = ""; 
+    let currentTrackIndex = 0; // Qual botão está selecionado
+    let shuffleBags = {}; 
+
+    // --- INICIALIZAÇÃO ---
+    window.onload = function() {
+        createTrackButtons();
+        
+        // Inicia contexto e pré-carrega
+        document.getElementById('status').innerText = "PRÉ-CARREGANDO...";
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        preloadNextTrack(); 
+    };
+
+    function createTrackButtons() {
+        const container = document.getElementById('trackList');
+        playlistConfig.forEach((track, index) => {
+            let btn = document.createElement('button');
+            btn.className = 'track-btn';
+            btn.innerText = track.label;
+            if (index === 0) btn.classList.add('active-track');
+            
+            btn.onclick = () => changeTrack(index);
+            container.appendChild(btn);
+        });
+    }
+
+    // --- MUDANÇA DE FAIXA ---
+    function changeTrack(index) {
+        if (index === currentTrackIndex) return;
+
+        // 1. Para tudo
+        stopNow(); 
+
+        // 2. Atualiza índice e visual
+        currentTrackIndex = index;
+        updateButtonsVisual();
+
+        // 3. Limpa buffer antigo e pré-carrega o novo
+        nextBuffer = null;
+        document.getElementById('status').innerText = "MÓDULO ALTERADO";
+        preloadNextTrack(); 
+    }
+
+    function updateButtonsVisual() {
+        const buttons = document.querySelectorAll('.track-btn');
+        buttons.forEach((btn, idx) => {
+            if (idx === currentTrackIndex) btn.classList.add('active-track');
+            else btn.classList.remove('active-track');
+        });
+    }
+
+    // --- CONTROLE PRINCIPAL ---
+    function togglePlay() {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        if (isPlaying) {
+            stopNow();
+        } else {
+            playNow();
+        }
+    }
+
+    function playNow() {
+        isPlaying = true;
+        
+        const btn = document.getElementById('btnControl');
+        btn.innerText = "PARAR";
+        btn.classList.add("stop-mode");
+
+        if (nextBuffer) {
+            playBuffer(nextBuffer, nextFilename);
+        } else {
+            document.getElementById('status').innerText = "BUFFERING...";
+        }
+    }
+
+    function stopNow() {
+        isPlaying = false;
+        
+        if (currentSource) {
+            try { currentSource.stop(); } catch(e) {}
+            currentSource = null;
+        }
+
+        const btn = document.getElementById('btnControl');
+        btn.innerText = "TOCAR";
+        btn.classList.remove("stop-mode");
+        document.getElementById('status').innerText = "PAUSADO";
+    }
+
+    function playBuffer(buffer, filename) {
+        if (!isPlaying) return;
+
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        source.start(0);
+        currentSource = source;
+
+        let isAI = filename.includes("VAR");
+        updateLog(isAI);
+        document.getElementById('status').innerText = "TRANSMITINDO";
+
+        // Limpa o slot e avisa: quando acabar essa, chame a próxima
+        nextBuffer = null;
+        source.onended = function() {
+            if (isPlaying) playNow();
+        };
+
+        // Baixa a próxima enquanto toca
+        preloadNextTrack();
+    }
+
+    async function preloadNextTrack() {
+        const file = getNextRandomFile();
+        nextFilename = file; // Guarda nome para o log
+
+        try {
+            const response = await fetch(file);
+            if (!response.ok) throw new Error("404");
+            const arrayBuffer = await response.arrayBuffer();
+            
+            audioCtx.decodeAudioData(arrayBuffer, (decodedBuffer) => {
+                nextBuffer = decodedBuffer;
+                
+                // Se estava esperando (Buffering), toca agora
+                if (isPlaying && !currentSource) {
+                    playNow();
+                }
+                if (!isPlaying) {
+                    document.getElementById('status').innerText = "PRONTO.";
+                }
+            });
+
+        } catch (e) {
+            console.error("Erro download", e);
+            setTimeout(preloadNextTrack, 1000);
+        }
+    }
+
+    // --- SORTEIO E CAMINHOS ---
+    function getNextRandomFile() {
+        const trackConfig = playlistConfig[currentTrackIndex]; // Pega config da faixa atual
+        
+        // Garante que o shuffle bag existe para essa faixa
+        if (!shuffleBags[trackConfig.prefix]) {
+            shuffleBags[trackConfig.prefix] = [];
+        }
+        let bag = shuffleBags[trackConfig.prefix];
+
+        // Enche o saco se vazio
+        if (bag.length === 0) {
+            let totalOptions = 1 + trackConfig.variations;
+            for (let i = 0; i < totalOptions; i++) bag.push(i);
+            // Embaralha
+            for (let i = bag.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [bag[i], bag[j]] = [bag[j], bag[i]];
+            }
+        }
+
+        let choice = bag.pop();
+        
+        // Monta o caminho (Pasta + Arquivo)
+        let folderPath = trackConfig.folder ? trackConfig.folder + "/" : "";
+        
+        if (choice === 0) return `${folderPath}${trackConfig.prefix}_ORG.mp3`;
+        return `${folderPath}${trackConfig.prefix}_VAR_${choice}.mp3`;
+    }
+
+    function updateLog(isAI) {
+        const log = document.getElementById('log');
+        const color = isAI ? "#ff0055" : "#00ff41"; 
+        let wave = "";
+        let len = Math.floor(Math.random() * 10) + 5;
+        for(let i=0; i<len; i++) wave += "|";
+        log.innerHTML = `<div style="color:${color}; letter-spacing:3px; opacity:0.7;">${wave}</div>` + log.innerHTML;
+    }
+
+    </script>
+</body>
+</html>
