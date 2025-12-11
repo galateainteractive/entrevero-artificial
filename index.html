@@ -40,6 +40,19 @@
             box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
         }
 
+        /* --- ESTILO DA CAPA (IMAGEM) --- */
+        #coverDisplay {
+            width: 100%;
+            height: auto;
+            aspect-ratio: 1 / 1; /* Garante que fique quadrado */
+            background-color: #000;
+            border: 1px solid #00ff41;
+            margin-bottom: 20px;
+            object-fit: cover; /* Ajusta a imagem sem esticar */
+            display: none; /* Escondido até carregar a primeira */
+            box-shadow: 0 0 10px rgba(0, 255, 65, 0.2);
+        }
+
         #btnControl {
             background: #00ff41;
             color: #000;
@@ -120,6 +133,9 @@
 
     <div class="main-container">
         <div id="status">SISTEMA ONLINE</div>
+        
+        <img id="coverDisplay" src="" alt="Capa">
+
         <button id="btnControl" onclick="togglePlay()">INICIAR</button>
 
         <div class="track-list-label">SELECIONAR MÓDULO:</div>
@@ -131,24 +147,28 @@
 
     <script>
     // --- CONFIGURAÇÃO ---
+    // PADRÃO DE IMAGEM: Nas pastas, nomeie como cover_1.jpg, cover_2.jpg, etc.
     const playlistConfig = [
         { 
             label: "modulo_a", 
             folder: "modulo_a", 
             prefix: "A_01", 
-            totalFiles: 10 // <--- VERIFIQUE A QUANTIDADE REAL
+            totalFiles: 10,   // Qtd de Áudios
+            totalImages: 5    // Qtd de Imagens (cover_1.jpg até cover_5.jpg)
         },
         { 
             label: "modulo_b", 
             folder: "modulo_b", 
             prefix: "B_01", 
-            totalFiles: 10 
+            totalFiles: 10,
+            totalImages: 5    // Mude conforme a pasta
         },
         { 
             label: "modulo_c", 
             folder: "modulo_c", 
             prefix: "C_01", 
-            totalFiles: 10 
+            totalFiles: 10,
+            totalImages: 5    // Mude conforme a pasta
         },
     ];
 
@@ -184,32 +204,27 @@
         });
     }
 
-    // --- MUDANÇA DE FAIXA (AGORA COM AUTO-PLAY) ---
+    // --- MUDANÇA DE FAIXA ---
     function changeTrack(index) {
-        if (index === currentTrackIndex && isPlaying) return; // Se já está tocando esse módulo, ignora
+        if (index === currentTrackIndex && isPlaying) return; 
         
-        // 1. Acorda o contexto de áudio (necessário para celulares)
         if (audioCtx.state === 'suspended') audioCtx.resume();
 
-        // 2. Para o som atual
         if (currentSource) {
             try { currentSource.stop(); } catch(e) {}
             currentSource = null;
         }
 
-        // 3. Atualiza índices e visual
         currentTrackIndex = index;
         updateButtonsVisual();
         nextBuffer = null;
         
-        // 4. FORÇA O ESTADO DE "TOCANDO"
         isPlaying = true;
         const btn = document.getElementById('btnControl');
         btn.innerText = "PARAR";
         btn.classList.add("stop-mode");
         document.getElementById('status').innerText = "CARREGANDO...";
 
-        // 5. Carrega. Quando terminar, o preloadNextTrack vai ver que isPlaying é true e tocará sozinho.
         preloadNextTrack(); 
     }
 
@@ -262,12 +277,37 @@
         source.start(0);
         currentSource = source;
 
+        // ATUALIZA LOG E CAPA ASSIM QUE COMEÇA A TOCAR
         updateLog(); 
+        updateCoverArt(); 
+
         document.getElementById('status').innerText = "TRANSMITINDO...";
 
         nextBuffer = null;
         source.onended = function() { if (isPlaying) playNow(); };
         preloadNextTrack();
+    }
+
+    // --- FUNÇÃO DA CAPA (IMAGEM) ---
+    function updateCoverArt() {
+        const trackConfig = playlistConfig[currentTrackIndex];
+        const imgElement = document.getElementById('coverDisplay');
+
+        // Se não tiver imagens configuradas, esconde
+        if (!trackConfig.totalImages || trackConfig.totalImages <= 0) {
+            imgElement.style.display = 'none';
+            return;
+        }
+
+        // Sorteia um número de 1 até totalImages
+        const randomImg = Math.floor(Math.random() * trackConfig.totalImages) + 1;
+        
+        // Monta o caminho: pasta/cover_X.jpg
+        const folderPath = trackConfig.folder ? trackConfig.folder + "/" : "";
+        const imagePath = `${folderPath}cover_${randomImg}.jpg`;
+
+        imgElement.src = imagePath;
+        imgElement.style.display = 'block'; // Mostra a imagem
     }
 
     async function preloadNextTrack() {
@@ -279,11 +319,7 @@
             const arrayBuffer = await response.arrayBuffer();
             audioCtx.decodeAudioData(arrayBuffer, (decodedBuffer) => {
                 nextBuffer = decodedBuffer;
-                
-                // --- LÓGICA MÁGICA ---
-                // Se o usuário deu play (ou clicou no botão do módulo), toca assim que baixar
                 if (isPlaying && !currentSource) playNow();
-                
                 if (!isPlaying) document.getElementById('status').innerText = "PRONTO.";
             });
         } catch (e) {
@@ -292,7 +328,7 @@
         }
     }
 
-    // --- SORTEIO ---
+    // --- SORTEIO DE ÁUDIO ---
     function getNextRandomFile() {
         const trackConfig = playlistConfig[currentTrackIndex];
         if (!shuffleBags[trackConfig.label]) shuffleBags[trackConfig.label] = [];
@@ -310,7 +346,6 @@
         return `${folderPath}${trackConfig.prefix}_VAR_${choice}.mp3`;
     }
 
-    // --- LOG VISUAL ---
     function updateLog() {
         const log = document.getElementById('log');
         const colors = ["#00ff41", "#ff0055", "#00ccff", "#ffff00"];
