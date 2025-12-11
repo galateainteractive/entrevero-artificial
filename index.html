@@ -2,7 +2,7 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>Entrevero - Smart Cache v3.2</title>
+    <title>Entrevero - Fast Player</title>
     <style>
         body {
             background-color: #1a1a1a;
@@ -17,7 +17,7 @@
             user-select: none;
         }
 
-        h1 { margin-bottom: 10px; letter-spacing: 2px; }
+        h1 { margin-bottom: 20px; letter-spacing: 2px; }
 
         .controls {
             border: 1px solid #333;
@@ -41,6 +41,7 @@
             text-transform: uppercase;
             width: 100%;
             transition: all 0.2s;
+            border-radius: 4px;
         }
 
         button:hover { background: #fff; transform: scale(1.02); }
@@ -73,7 +74,7 @@
     <h1>ENTREVERO_AI</h1>
 
     <div class="controls">
-        <button id="btnControl" onclick="togglePlay()">INICIAR SISTEMA</button>
+        <button id="btnControl" onclick="togglePlay()">INICIAR</button>
         
         <div id="status">SISTEMA ONLINE</div>
         <div id="log"></div>
@@ -87,162 +88,155 @@
 
     // --- VARIÁVEIS DO SISTEMA ---
     let audioCtx;
-    let audioBuffers = {}; // O CACHE FICA AQUI E NUNCA É APAGADO
     let isPlaying = false;
-    let nextNoteTime = 0;
     
-    let activeSources = []; 
+    // Armazena o som que está tocando agora
+    let currentSource = null;
+    
+    // Armazena a PRÓXIMA música (já baixada e pronta para tocar)
+    let nextBuffer = null;
+    let nextFilename = ""; // Para log
+
     let shuffleBags = {}; 
-    let retryTimer;
+
+    // --- AO ABRIR O SITE ---
+    // Já sorteia e baixa a primeira música em silêncio
+    window.onload = function() {
+        document.getElementById('status').innerText = "PRÉ-CARREGANDO...";
+        // Inicia o contexto (necessário para decodificar, mas fica suspenso até o clique)
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        preloadNextTrack(); 
+    };
 
     // 1. CONTROLE PRINCIPAL
     function togglePlay() {
-        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        
+        // Retoma o contexto de áudio se o navegador tiver suspendido (comum no Chrome)
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
         if (isPlaying) {
-            stopPlayback();
+            stopNow();
         } else {
-            startPlayback();
+            playNow();
         }
     }
 
-    // 2. LÓGICA DE STREAMING
-    async function startPlayback() {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        
+    // 2. TOCA O SOM (Instantâneo se já tiver baixado)
+    function playNow() {
         isPlaying = true;
-        nextNoteTime = audioCtx.currentTime + 0.1; 
-        
+
+        // Atualiza UI
         const btn = document.getElementById('btnControl');
         btn.innerText = "PARAR";
         btn.classList.add("stop-mode");
-        btn.disabled = false;
-        
-        document.getElementById('status').innerText = "INICIANDO BUFFER...";
-        document.getElementById('log').innerHTML = ""; 
 
-        processNextChunk();
+        // Se o buffer já está pronto (pré-carregado), toca ele.
+        // Se não (internet muito lenta), ele vai esperar o preload terminar.
+        if (nextBuffer) {
+            playBuffer(nextBuffer, nextFilename);
+        } else {
+            document.getElementById('status').innerText = "BUFFERING...";
+        }
     }
 
-    function stopPlayback() {
-        isPlaying = false; // Isso impede novos sons de começarem
+    // 3. PARA TUDO (Imediato)
+    function stopNow() {
+        isPlaying = false;
         
-        // 1. Cancela tentativas futuras
-        clearTimeout(retryTimer); 
-        
-        // 2. MATA SOM APENAS DO QUE ESTÁ TOCANDO (Silêncio Imediato)
-        activeSources.forEach(source => {
-            try { source.stop(); } catch(e) {}
-        });
-        activeSources = [];
+        // Mata o som atual
+        if (currentSource) {
+            try { currentSource.stop(); } catch(e) {}
+            currentSource = null;
+        }
 
-        // NOTA: Não cancelamos mais o download (fetch). 
-        // Se estiver baixando, ele termina e salva no cache silenciosamente.
-
-        // 3. Reset UI
+        // Atualiza UI
         const btn = document.getElementById('btnControl');
-        btn.innerText = "RETOMAR";
+        btn.innerText = "TOCAR";
         btn.classList.remove("stop-mode");
-        btn.disabled = false;
-        document.getElementById('status').innerText = "PAUSA (MEMÓRIA ATIVA)";
+        document.getElementById('status').innerText = "PAUSADO (PRONTO)";
+        
+        // NOTA: Não jogamos fora o 'nextBuffer'. 
+        // Ele fica guardado. Se der play de novo, começa instantâneo.
     }
 
-    async function processNextChunk() {
-        // Se parou, não faz nada
+    // 4. A MÁGICA: Toca um e já baixa o próximo
+    function playBuffer(buffer, filename) {
+        // Se o usuário deu stop milissegundos antes, cancela
         if (!isPlaying) return;
 
-        const nextFile = getNextRandomFile();
+        // Cria a fonte de áudio
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
         
-        try {
-            // Feedback Visual Inteligente
-            if (audioBuffers[nextFile]) {
-                // Se já tem no cache, não mostra nada ou mostra algo sutil
-            } else {
-                document.getElementById('status').innerText = "BAIXANDO DADOS...";
-            }
+        // Toca AGORA
+        source.start(0);
+        currentSource = source;
 
-            // Baixa (sem AbortController, deixa terminar sempre)
-            await loadFile(nextFile);
-            
-            // Checagem Crucial: 
-            // O download acabou. O usuário ainda quer ouvir?
-            if (!isPlaying) {
-                console.log("Download concluído em background para cache: " + nextFile);
-                return; // Sai sem tocar
-            }
-
-            playAndScheduleNext(nextFile);
-
-        } catch (e) {
-            console.error("Erro de rede:", e);
-            if (isPlaying) {
-                document.getElementById('status').innerText = "ERRO REDE. TENTANDO...";
-                retryTimer = setTimeout(processNextChunk, 1000); 
-            }
-        }
-    }
-
-    function playAndScheduleNext(filename) {
-        if (!isPlaying) return;
-
-        const buffer = audioBuffers[filename];
-        const duration = buffer.duration;
-        
-        let playTime = nextNoteTime;
-        if (playTime < audioCtx.currentTime) {
-            playTime = audioCtx.currentTime; 
-        }
-
-        playBuffer(filename, playTime);
-        
+        // Log Visual
         let isAI = filename.includes("VAR");
         updateLog(isAI);
         document.getElementById('status').innerText = "TRANSMITINDO";
 
-        nextNoteTime = playTime + duration;
-        processNextChunk(); 
-    }
+        // --- O SEGREDO DA CONTINUIDADE ---
+        // 1. Limpa o buffer atual (já estamos usando)
+        nextBuffer = null;
 
-    // --- FERRAMENTAS ---
-
-    async function loadFile(filename) {
-        if (audioBuffers[filename]) return; // Já tem? Retorna instantâneo.
-
-        const response = await fetch(filename);
-        if (!response.ok) throw new Error(`404: ${filename}`);
-        const arrayBuffer = await response.arrayBuffer();
-        
-        // Decodifica e SALVA NO CACHE GLOBAL
-        // Mesmo se estiver pausado, o decode acontece para ficar pronto para depois
-        const audioData = await audioCtx.decodeAudioData(arrayBuffer);
-        audioBuffers[filename] = audioData;
-    }
-
-    function playBuffer(key, time) {
-        // Só toca se estiver 'Playing'
-        if (!isPlaying || !audioBuffers[key]) return;
-
-        const source = audioCtx.createBufferSource();
-        source.buffer = audioBuffers[key];
-        source.connect(audioCtx.destination);
-        source.start(time);
-        
-        activeSources.push(source);
-        
-        source.onended = () => {
-            const index = activeSources.indexOf(source);
-            if (index > -1) activeSources.splice(index, 1);
+        // 2. Quando essa música acabar, toca a próxima (Loop)
+        source.onended = function() {
+            // Só toca a próxima se ainda estivermos no modo "Playing"
+            if (isPlaying) {
+                playNow(); // Chama a si mesmo para tocar o que estiver no nextBuffer
+            }
         };
+
+        // 3. Enquanto essa toca, BAIXA A PRÓXIMA IMEDIATAMENTE
+        preloadNextTrack();
     }
+
+    // 5. CARREGAMENTO EM SEGUNDO PLANO
+    async function preloadNextTrack() {
+        const file = getNextRandomFile();
+        nextFilename = file;
+
+        try {
+            const response = await fetch(file);
+            if (!response.ok) throw new Error("404");
+            const arrayBuffer = await response.arrayBuffer();
+            
+            // Decodifica e guarda na variável 'nextBuffer'
+            // Assim que terminar, fica esperando o playNow() chamar
+            audioCtx.decodeAudioData(arrayBuffer, (decodedBuffer) => {
+                nextBuffer = decodedBuffer;
+                
+                // Se o player estava esperando (buffering) e agora terminou de baixar:
+                if (isPlaying && !currentSource) {
+                    playNow();
+                }
+                
+                // Se o site acabou de abrir:
+                if (!isPlaying) {
+                    document.getElementById('status').innerText = "PRONTO PARA INICIAR";
+                }
+            });
+
+        } catch (e) {
+            console.error("Erro download", e);
+            // Tenta de novo se falhar
+            setTimeout(preloadNextTrack, 1000);
+        }
+    }
+
+    // --- UTILITÁRIOS (Sorteio e Log) ---
 
     function getNextRandomFile() {
         const blockConfig = songStructure[0]; 
-        
         let bag = shuffleBags[blockConfig.name];
+        
         if (!bag || bag.length === 0) {
             bag = [];
             let totalOptions = 1 + blockConfig.variations;
             for (let i = 0; i < totalOptions; i++) bag.push(i);
+            // Embaralha
             for (let i = bag.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [bag[i], bag[j]] = [bag[j], bag[i]];
