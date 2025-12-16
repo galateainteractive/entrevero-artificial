@@ -40,6 +40,7 @@
             box-shadow: 0 0 15px rgba(0, 255, 65, 0.1);
         }
 
+        /* CAPA */
         #coverDisplay {
             width: 100%;
             height: auto;
@@ -146,57 +147,57 @@
 
     <script>
     // --- CONFIGURAÇÃO ---
-        const playlistConfig = [
-            {
-                label: "modulo_a",
-                folder: "modulo_a",
-                prefix: "A_01",
-                totalFiles: 12,   // Conferido no print
-                totalImages: 1
-            },
-            {
-                label: "modulo_b",
-                folder: "modulo_b",
-                prefix: "B_01",
-                totalFiles: 10,   // Conferido no print
-                totalImages: 1
-            },
-            {
-                label: "modulo_c",
-                folder: "modulo_c",
-                prefix: "C_01",
-                totalFiles: 14,   // Conferido no print
-                totalImages: 1
-            },
-            {
-                label: "modulo_d",
-                folder: "modulo_d",
-                prefix: "D_01",
-                totalFiles: 14,   // Conferido no print (do 1 ao 14)
-                totalImages: 1
-            },
-            {
-                label: "modulo_e",
-                folder: "modulo_e",
-                prefix: "E_01",
-                totalFiles: 20,   // Conferido no print
-                totalImages: 1
-            },
-            {
-                label: "modulo_f",
-                folder: "modulo_f",
-                prefix: "F_01",
-                totalFiles: 7,    // Conferido no print
-                totalImages: 1
-            },
-            {
-                label: "modulo_g",
-                folder: "modulo_g",
-                prefix: "G_01",
-                totalFiles: 6,    // Conferido no print
-                totalImages: 1
-            },
-        ];
+    const playlistConfig = [
+        { 
+            label: "modulo_a", 
+            folder: "modulo_a", 
+            prefix: "A_01", 
+            totalFiles: 12,   
+            totalImages: 1    
+        },
+        { 
+            label: "modulo_b", 
+            folder: "modulo_b", 
+            prefix: "B_01", 
+            totalFiles: 10,   
+            totalImages: 1    
+        },
+        { 
+            label: "modulo_c", 
+            folder: "modulo_c", 
+            prefix: "C_01", 
+            totalFiles: 14,   
+            totalImages: 1    
+        },
+        { 
+            label: "modulo_d", 
+            folder: "modulo_d", 
+            prefix: "D_01", 
+            totalFiles: 14,   
+            totalImages: 1      
+        },
+        { 
+            label: "modulo_e", 
+            folder: "modulo_e", 
+            prefix: "E_01", 
+            totalFiles: 20,   
+            totalImages: 1      
+        },
+        { 
+            label: "modulo_f", 
+            folder: "modulo_f", 
+            prefix: "F_01", 
+            totalFiles: 7,    
+            totalImages: 1      
+        },
+        { 
+            label: "modulo_g", 
+            folder: "modulo_g", 
+            prefix: "G_01", 
+            totalFiles: 6,    
+            totalImages: 1      
+        },
+    ];
 
     // --- VARIÁVEIS ---
     let audioCtx;
@@ -243,6 +244,8 @@
 
         currentTrackIndex = index;
         updateButtonsVisual();
+        
+        // LIMPEZA IMEDIATA DA AGULHA
         nextBuffer = null;
         
         isPlaying = true;
@@ -330,21 +333,37 @@
         imgElement.style.display = 'block';
     }
 
+    // --- AQUI ESTÁ A PROTEÇÃO DO CRACHÁ ---
     async function preloadNextTrack() {
+        // 1. O "CRACHÁ": Salva qual o módulo atual no momento do pedido
+        const loadingIndex = currentTrackIndex;
+        
         const file = getNextRandomFile();
         nextFilename = file; 
+
         try {
             const response = await fetch(file);
             if (!response.ok) throw new Error("404");
             const arrayBuffer = await response.arrayBuffer();
+            
             audioCtx.decodeAudioData(arrayBuffer, (decodedBuffer) => {
+                // 2. A VERIFICAÇÃO: 
+                // Se o módulo mudou enquanto baixava (loadingIndex diferente do atual), cancela tudo.
+                if (loadingIndex !== currentTrackIndex) {
+                    return; // Aborta e não salva no nextBuffer
+                }
+
                 nextBuffer = decodedBuffer;
+                
                 if (isPlaying && !currentSource) playNow();
                 if (!isPlaying) document.getElementById('status').innerText = "PRONTO.";
             });
         } catch (e) {
             console.error("Erro download", e);
-            setTimeout(preloadNextTrack, 1000);
+            // Só tenta de novo se ainda estivermos no mesmo módulo
+            if (loadingIndex === currentTrackIndex) {
+                setTimeout(preloadNextTrack, 1000);
+            }
         }
     }
 
